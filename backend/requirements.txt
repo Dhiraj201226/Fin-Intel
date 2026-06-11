@@ -1,0 +1,16 @@
+fastapi>=0.111.0
+uvicorn[standard]>=0.23.2
+python-multipart>=0.0.6
+pydantic>=2.0
+sse-starlette
+google-generativeai
+chromadb
+PyMuPDF
+PyPDF2
+tavily-python
+cachetools
+slowapi
+python-dotenv
+httpx
+yfinance
+pandas

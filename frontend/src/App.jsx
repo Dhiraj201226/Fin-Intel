@@ -1,0 +1,511 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  Terminal as TerminalIcon, 
+  GitMerge, 
+  Database, 
+  FileCode, 
+  Settings, 
+  Activity, 
+  ChevronRight, 
+  Lock, 
+  Unlock,
+  ShieldCheck,
+  TrendingUp
+} from 'lucide-react';
+
+import ChatConsole from './components/ChatConsole.jsx';
+import PipelineStatus from './components/PipelineStatus.jsx';
+import ReportViewer from './components/ReportViewer.jsx';
+import DocManager from './components/DocManager.jsx';
+import ConflictResolver from './components/ConflictResolver.jsx';
+import MemoryVault from './components/MemoryVault.jsx';
+import SettingsDrawer from './components/SettingsDrawer.jsx';
+
+import { 
+  mockStocks, 
+  mockReActLogs, 
+  mockReports, 
+  mockConflictLogs, 
+  mockEpisodicMemory, 
+  mockVectorDB 
+} from './mockData';
+
+export default function App() {
+  // Navigation tab states: 'terminal' | 'conflicts' | 'memory' | 'ingestion'
+  const [activeTab, setActiveTab] = useState('terminal');
+  
+  // Settings Drawer state
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settings, setSettings] = useState({
+    provider: 'gemini',
+    geminiKey: localStorage.getItem('ara1_gemini_key') || '',
+    openaiKey: localStorage.getItem('ara1_openai_key') || '',
+    groqKey: localStorage.getItem('ara1_groq_key') || '',
+    maxSteps: 8,
+    vectorStore: 'chromadb',
+    temperature: 0.3
+  });
+
+  // Save keys to localStorage
+  useEffect(() => {
+    localStorage.setItem('ara1_gemini_key', settings.geminiKey);
+    localStorage.setItem('ara1_openai_key', settings.openaiKey);
+    localStorage.setItem('ara1_groq_key', settings.groqKey);
+  }, [settings.geminiKey, settings.openaiKey, settings.groqKey]);
+
+  // General App states
+  const [selectedStock, setSelectedStock] = useState('AAPL');
+  const [query, setQuery] = useState('');
+  const [logs, setLogs] = useState([]);
+  const [activeTier, setActiveTier] = useState(0); // 0 = Idle, 1 = SEC, 2 = Web, 3 = News, 4 = Media
+  const [loading, setLoading] = useState(false);
+  const [activeReport, setActiveReport] = useState(null);
+
+  // Database lists populated from live backend
+  const [episodicMemory, setEpisodicMemory] = useState([]);
+  const [vectorDB, setVectorDB] = useState([]);
+
+  // Fetch live memory data on mount
+  useEffect(() => {
+    const fetchMemoryData = async () => {
+      try {
+        const epRes = await fetch("http://localhost:7860/api/episodes", { headers: { "X-API-Key": "test_key" } });
+        if (epRes.ok) {
+          const epData = await epRes.json();
+          setEpisodicMemory(epData);
+        }
+
+        const vecRes = await fetch("http://localhost:7860/api/vectors", { headers: { "X-API-Key": "test_key" } });
+        if (vecRes.ok) {
+          const vecData = await vecRes.json();
+          setVectorDB(vecData);
+        }
+      } catch (e) {
+        console.error("Failed to fetch memory vault data", e);
+      }
+    };
+    fetchMemoryData();
+  }, []);
+  
+  // Custom uploaded/pulled documents list
+  const [documents, setDocuments] = useState([
+    { name: "AAPL_10K_FY2024.pdf", size: "8.4 MB", chunks: 1420 },
+    { name: "MSFT_10K_FY2024.pdf", size: "11.2 MB", chunks: 1845 },
+    { name: "TSLA_10K_FY2024.pdf", size: "6.1 MB", chunks: 924 },
+    { name: "GS_10K_FY2024.pdf", size: "9.7 MB", chunks: 1680 }
+  ]);
+  const [uploadLoading, setUploadLoading] = useState(false);
+
+  // Suggested prompts
+  const suggestedQueries = [
+    "Should I buy Apple (AAPL) stock right now?",
+    "Analyze Tesla (TSLA) automotive gross margins and valuation risks",
+    "Evaluate Microsoft (MSFT) OpenAI partnership and cloud growth drivers",
+    "Analyze Goldman Sachs (GS) investment banking rebound and capital targets"
+  ];
+
+  // Helper to extract ticker from query
+  const getTickerFromQuery = (q) => {
+    // Look for tickers with .NS or .BO (e.g. RELIANCE.NS)
+    const indianMatch = q.match(/\b([A-Z]+(\.NS|\.BO))\b/);
+    if (indianMatch) {
+      return indianMatch[1];
+    }
+
+    // Look for a standard 1-5 letter uppercase ticker symbol in parentheses or standing alone
+    // e.g. "What is (NVDA) doing?" or "Analyze META"
+    const match = q.match(/\b([A-Z]{1,5})\b/);
+    if (match) {
+      // Exclude common ALL CAPS words that aren't tickers
+      const exclusions = ["WHAT", "HOW", "WHY", "IS", "THE", "A", "AN", "AND", "OR", "IF", "IT"];
+      if (!exclusions.includes(match[1])) {
+        return match[1];
+      }
+    }
+    
+    // Fallbacks if no explicit ticker is capitalized
+    const uppercaseQuery = q.toUpperCase();
+    if (uppercaseQuery.includes('APPLE')) return 'AAPL';
+    if (uppercaseQuery.includes('TESLA')) return 'TSLA';
+    if (uppercaseQuery.includes('MICROSOFT')) return 'MSFT';
+    if (uppercaseQuery.includes('GOLDMAN')) return 'GS';
+    if (uppercaseQuery.includes('NVIDIA')) return 'NVDA';
+    if (uppercaseQuery.includes('META')) return 'META';
+    if (uppercaseQuery.includes('AMAZON')) return 'AMZN';
+    
+    return null; // Let backend figure it out or fail gracefully
+  };
+
+  // Execute Agent Query (Tries live API first, falls back to client-side simulation)
+  const handleExecute = async () => {
+    if (!query.trim()) return;
+
+    setLoading(true);
+    setLogs([]);
+    setActiveReport(null);
+    setActiveTier(0);
+
+    const ticker = getTickerFromQuery(query);
+    setSelectedStock(ticker);
+
+    const providerKey = settings.provider === 'gemini' ? settings.geminiKey : (settings.provider === 'groq' ? settings.groqKey : settings.openaiKey);
+
+    try {
+      // 1. Attempt connection to live FastAPI backend
+      const response = await fetch("http://localhost:7860/api/research", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-llm-provider": settings.provider,
+          "x-llm-api-key": providerKey || "",
+          "x-llm-max-steps": settings.maxSteps.toString(),
+          "x-llm-temperature": settings.temperature.toString(),
+          "X-API-Key": "test_key"
+        },
+        body: JSON.stringify({ query: query, ticker: ticker })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server returned ${response.status}`);
+      }
+
+      const data = await response.json();
+      if (data.logs && data.logs.length > 0) {
+        // Stream the real logs returned from backend
+        let currentLogIndex = 0;
+        const streamNextLog = () => {
+          if (currentLogIndex < data.logs.length) {
+            const nextLog = data.logs[currentLogIndex];
+            setLogs(prev => [...prev, nextLog]);
+
+            if (nextLog.type === 'action') {
+              if (nextLog.text.includes('vector_store')) {
+                setActiveTier(1);
+              } else if (nextLog.text.includes('yfinance_api')) {
+                setActiveTier(2);
+              }
+            }
+
+            currentLogIndex++;
+            const delay = nextLog.type === 'thought' ? 1000 : 1500;
+            setTimeout(streamNextLog, delay);
+          } else {
+            setLoading(false);
+            setActiveReport(data.report);
+            setActiveTier(0);
+            
+            // Add to Episodic Memory List
+            const wasEarlyStopped = data.logs.some(l => l.text && l.text.toLowerCase().includes("early"));
+            const newEpisode = {
+              id: `EP-${Math.floor(1000 + Math.random() * 9000)}`,
+              timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
+              query: query,
+              status: wasEarlyStopped ? "EARLY_STOPPED" : "SUCCESS",
+              toolsUsed: ["vector_store", "yfinance_api", "financial_engine"],
+              failures: "None",
+              recovery: "N/A",
+              strategy: `2-Tier hierarchy: ${wasEarlyStopped ? "early stopped at Stage 1" : "completed all stages"} for query.`
+            };
+            setEpisodicMemory(prev => [newEpisode, ...prev]);
+          }
+        };
+        setTimeout(streamNextLog, 500);
+        return;
+      } else {
+        console.warn("Backend returned empty logs array!");
+        setLoading(false);
+        setLogs([{
+          type: 'error',
+          text: `Error: The backend processed the request but returned no logs.`
+        }]);
+      }
+    } catch (err) {
+      console.error("Backend API Error:", err.message);
+      setLogs([{
+        type: 'error',
+        text: `Error: Unable to connect to ARA-1 backend. Please ensure the backend is running. Details: ${err.message}`
+      }]);
+      setLoading(false);
+    }
+  };
+
+  const handleResetSession = () => {
+    setLogs([]);
+    setActiveReport(null);
+    setActiveTier(0);
+    setQuery('');
+  };
+
+  // SEC Ticker filings pull simulation removed as part of V2.0
+
+  // Real document upload to backend with Authenticity Scan
+  const handleDocUpload = async (file) => {
+    setUploadLoading(true);
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const response = await fetch("http://localhost:7860/api/upload", {
+        method: "POST",
+        headers: {
+          "x-llm-provider": settings.provider,
+          "x-llm-api-key": settings.provider === 'gemini' ? settings.geminiKey : (settings.provider === 'groq' ? settings.groqKey : settings.openaiKey),
+          "X-API-Key": "test_key"
+        },
+        body: formData
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => null);
+        throw new Error(errData?.detail || `Upload failed with status ${response.status}`);
+      }
+
+      const result = await response.json();
+      
+      setDocuments(prev => [
+        { name: result.filename, size: result.size, chunks: result.chunks },
+        ...prev
+      ]);
+      
+      // Notify memory/vector UI
+      const newVec = {
+        id: `vec_${Math.floor(100 + Math.random() * 900)}`,
+        ticker: "CUSTOM",
+        tier: "Tier 1 (SEC Filing)",
+        snippet: `Successfully uploaded and verified ${result.filename} with SEC Authenticity Checker...`,
+        vector: "[Embedded]"
+      };
+      setVectorDB(prev => [newVec, ...prev]);
+
+      alert(`Successfully uploaded ${result.filename}! (${result.chunks} chunks stored)`);
+
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setUploadLoading(false);
+    }
+  };
+
+
+  const activeStockData = mockStocks[selectedStock];
+
+  return (
+    <div className="h-screen w-screen bg-[#0b0f17] flex flex-col font-sans">
+      
+      {/* Top Navigation / Terminal Header Bar */}
+      <header className="bg-[#121824] border-b border-[#242f49] px-4 py-3 flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center justify-center bg-[#10b981]/15 border border-[#10b981]/30 p-1.5 rounded">
+            <Activity className="h-5 w-5 text-[#10b981] animate-pulse" />
+          </div>
+          <div>
+            <h1 className="text-sm font-bold text-white tracking-widest uppercase">
+              FinIntel AI Agent
+            </h1>
+            <span className="text-[9px] text-[#10b981] font-mono tracking-wider flex items-center gap-1.5">
+              <span className="status-indicator bg-[#10b981] pulse-green"></span>
+              SYSTEM STATUS: CALIBRATED & AUDITED
+            </span>
+          </div>
+        </div>
+
+        {/* Global Stats bar */}
+        <div className="hidden lg:flex items-center gap-6 font-mono text-[10px] text-slate-500 border-l border-r border-[#242f49] px-6">
+          <div>
+            CORE LLM: <span className="text-white font-bold">{settings.provider === 'gemini' ? 'Gemini 1.5 Flash' : 'GPT-4o'}</span>
+          </div>
+          <div>
+            MEMORY VECTORS: <span className="text-[#8b5cf6] font-bold">{documents.reduce((acc, d) => acc + d.chunks, 0)} Chunks</span>
+          </div>
+          <div>
+            MARKET DATA: <span className="text-[#10b981] font-bold">Yahoo Finance Active</span>
+          </div>
+        </div>
+
+        {/* Settings and Info */}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1 bg-[#0b0f17] border border-[#242f49] rounded px-2.5 py-1 text-[10px] font-semibold text-slate-400">
+            {settings.geminiKey || settings.openaiKey || settings.groqKey ? (
+              <>
+                <Unlock className="h-3 w-3 text-[#10b981]" />
+                <span className="text-slate-300">Keys Activated</span>
+              </>
+            ) : (
+              <>
+                <Lock className="h-3 w-3 text-slate-500" />
+                <span>Demo Sandbox</span>
+              </>
+            )}
+          </div>
+          <button 
+            onClick={() => setSettingsOpen(true)}
+            className="p-1.5 rounded border border-[#242f49] bg-[#1a2234] hover:bg-[#242f49] text-slate-300 hover:text-white transition-all flex items-center gap-1.5 text-xs font-semibold"
+          >
+            <Settings className="h-4 w-4" />
+            <span>Settings</span>
+          </button>
+        </div>
+      </header>
+
+      {/* Main Workspace Layout */}
+      <div className="flex-1 flex min-h-0 overflow-hidden">
+        
+        {/* Navigation Sidebar Panel */}
+        <aside className="w-56 bg-[#121824]/60 border-r border-[#242f49] p-4 flex flex-col justify-between shrink-0">
+          <div className="space-y-5">
+            {/* Nav Title */}
+            <div>
+              <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block mb-2">
+                Operational Modules
+              </span>
+              <div className="flex flex-col gap-1">
+                <button
+                  onClick={() => setActiveTab('terminal')}
+                  className={`w-full text-left py-2 px-3 rounded text-xs font-medium flex items-center gap-2.5 transition-all ${
+                    activeTab === 'terminal'
+                      ? 'bg-[#10b981]/15 text-[#10b981] border-l-2 border-[#10b981]'
+                      : 'text-slate-400 hover:bg-[#1a2234] hover:text-white'
+                  }`}
+                >
+                  <TerminalIcon className="h-4 w-4" />
+                  <span>Research Terminal</span>
+                </button>
+                <button
+                  onClick={() => setActiveTab('conflicts')}
+                  className={`w-full text-left py-2 px-3 rounded text-xs font-medium flex items-center gap-2.5 transition-all ${
+                    activeTab === 'conflicts'
+                      ? 'bg-[#ef4444]/15 text-[#ef4444] border-l-2 border-[#ef4444]'
+                      : 'text-slate-400 hover:bg-[#1a2234] hover:text-white'
+                  }`}
+                >
+                  <GitMerge className="h-4 w-4" />
+                  <span>Conflict Lab</span>
+                </button>
+                <button
+                  onClick={() => setActiveTab('memory')}
+                  className={`w-full text-left py-2 px-3 rounded text-xs font-medium flex items-center gap-2.5 transition-all ${
+                    activeTab === 'memory'
+                      ? 'bg-[#8b5cf6]/15 text-[#8b5cf6] border-l-2 border-[#8b5cf6]'
+                      : 'text-slate-400 hover:bg-[#1a2234] hover:text-white'
+                  }`}
+                >
+                  <Database className="h-4 w-4" />
+                  <span>Memory Vault</span>
+                </button>
+                <button
+                  onClick={() => setActiveTab('ingestion')}
+                  className={`w-full text-left py-2 px-3 rounded text-xs font-medium flex items-center gap-2.5 transition-all ${
+                    activeTab === 'ingestion'
+                      ? 'bg-[#3b82f6]/15 text-[#3b82f6] border-l-2 border-[#3b82f6]'
+                      : 'text-slate-400 hover:bg-[#1a2234] hover:text-white'
+                  }`}
+                >
+                  <FileCode className="h-4 w-4" />
+                  <span>Filings Portal</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Quick stock selector */}
+            <div className="pt-2 border-t border-[#242f49]">
+              <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block mb-2">
+                Active Research Ticker
+              </span>
+              <div className="grid grid-cols-3 gap-1.5 font-mono text-[10px]">
+                {Object.keys(mockStocks).map(sym => (
+                  <button
+                    key={sym}
+                    onClick={() => {
+                      setSelectedStock(sym);
+                      setActiveReport(mockReports[sym]);
+                      setLogs(mockReActLogs[sym]);
+                    }}
+                    className={`py-1.5 rounded border text-center font-bold transition-all ${
+                      selectedStock === sym
+                        ? 'border-[#10b981] bg-[#10b981]/10 text-white'
+                        : 'border-[#242f49] text-slate-500 hover:border-slate-600'
+                    }`}
+                  >
+                    {sym}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Compliance tag */}
+          <div className="p-3 bg-[#0b0f17] border border-[#242f49] rounded space-y-1">
+            <div className="flex items-center gap-1.5 text-[9px] font-bold text-slate-300">
+              <ShieldCheck className="h-3.5 w-3.5 text-[#10b981]" />
+              <span>MARKET COMPLIANT</span>
+            </div>
+            <p className="text-[8px] text-slate-500 leading-normal">
+              Market scrapers and RAG pipelines conform to institutional sandbox security filters.
+            </p>
+          </div>
+        </aside>
+
+        {/* Center Panel - Main display based on navigation */}
+        <main className="flex-1 p-4 flex flex-col gap-4 min-w-0">
+          
+          {/* Tab 1: Terminal & RAG Dashboard */}
+          {activeTab === 'terminal' && (
+            <>
+              {/* Dynamic Hierarchy status visual bar */}
+              <PipelineStatus activeTier={activeTier} />
+
+              {/* Inner splits: Left Chat Console, Right Report Viewer */}
+              <div className="flex-1 flex gap-4 min-h-0">
+                <ChatConsole 
+                  logs={logs}
+                  loading={loading}
+                  query={query}
+                  setQuery={setQuery}
+                  onSubmit={handleExecute}
+                  onReset={handleResetSession}
+                  suggestedQueries={suggestedQueries}
+                />
+                
+                <ReportViewer report={activeReport} />
+              </div>
+            </>
+          )}
+
+          {/* Tab 2: Conflict Lab */}
+          {activeTab === 'conflicts' && (
+            <ConflictResolver conflicts={mockConflictLogs} />
+          )}
+
+          {/* Tab 3: Memory Vault Databases */}
+          {activeTab === 'memory' && (
+            <MemoryVault 
+              episodicLogs={episodicMemory} 
+              vectorLogs={vectorDB} 
+            />
+          )}
+
+          {/* Tab 4: Ingestion Documents Portal */}
+          {activeTab === 'ingestion' && (
+            <DocManager 
+              documents={documents}
+              onUpload={handleDocUpload}
+              uploadLoading={uploadLoading}
+            />
+          )}
+
+        </main>
+
+
+
+      </div>
+
+      {/* Settings Drawer Overlay */}
+      <SettingsDrawer 
+        isOpen={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        settings={settings}
+        onSave={setSettings}
+      />
+    </div>
+  );
+}
