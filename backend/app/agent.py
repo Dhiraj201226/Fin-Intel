@@ -2,11 +2,10 @@ import json
 import datetime
 import random
 from app.llm_helper import LLMHelper
-from app.tools.research import tavily_web_search
 from app.tools.reporting import ReportGenerator
 from app.memory_store import EpisodicMemory, ChromaVectorStore
 from app.tools.financial_engine import FinancialRecommendationEngine
-from app.tools.yfinance_client import fetch_yfinance_facts
+from app.tools.yfinance_client import fetch_yfinance_facts, generate_candlestick_chart
 
 MAX_ITER = 12
 
@@ -56,6 +55,117 @@ class ReActAgent:
         accumulated_context = ""
         iteration = 0
 
+        # --- INTENT CLASSIFIER ---
+        yield self._format_sse("thought", "Classifying query intent...", 0, iteration)
+        intent_prompt = f"Does the following user query ask for a stock recommendation/financial analysis of a company, or is it asking to analyze uploaded documents/custom data? (Hint: if the query asks to 'summarize', mentions a 'section', or asks questions about text, it is likely 'ANALYSIS'). Reply with exactly 'RECOMMENDATION' or 'ANALYSIS'.\n\nQuery: {query}"
+        intent_response = LLMHelper.generate_text(intent_prompt, provider=self.provider, api_key=self.api_key)
+        
+        intent = "ANALYSIS" if "ANALYSIS" in intent_response.upper() and "RECOMMENDATION" not in intent_response.upper() else "RECOMMENDATION"
+        
+        # If both words appear (e.g. "It is RECOMMENDATION, not ANALYSIS"), default to RECOMMENDATION
+        if "RECOMMENDATION" in intent_response.upper():
+            intent = "RECOMMENDATION"
+        elif "ANALYSIS" in intent_response.upper():
+            intent = "ANALYSIS"
+            
+        if "[DEMO MODE]" in intent_response:
+            intent = "RECOMMENDATION"
+
+        yield self._format_sse("observation", f"Intent Classified as: {intent}", 0, iteration)
+
+        if intent == "ANALYSIS":
+            yield self._format_sse("thought", "Executing Document Analysis Branch...", 0, iteration)
+            q_emb = LLMHelper.generate_embeddings([query], provider=self.provider, api_key=self.api_key)[0]
+            
+            yield self._format_sse("action", "vector_store.similarity_search(source_type='user_upload', k=22)", 0, iteration)
+            doc_results = self.vector_store.similarity_search(q_emb, k=22, custom_where={"source_type": "user_upload"})
+            
+            if not doc_results:
+                yield self._format_sse("error", "No uploaded documents found to analyze. Please upload a PDF document first.", 0, iteration)
+                yield self._format_sse("done", "Episode complete", 0, iteration)
+                return
+            
+            context = "\n\n".join([res['snippet'] for res in doc_results])
+            yield self._format_sse("observation", f"Retrieved {len(doc_results)} chunks from uploaded documents.", 0, iteration)
+            
+            yield self._format_sse("thought", "Generating answer based on uploaded documents...", 0, iteration)
+            analysis_prompt = f"""SYSTEM ROLE: You are a strict, precise financial document analyst.
+You must use ONLY the provided Document Text to answer the user's query.
+
+RULES:
+1. If the user requests a summary, provide a concise summary of the relevant sections.
+2. If the user asks for data from a table, you MUST provide EVERY SINGLE ROW and COLUMN of the relevant data. DO NOT truncate, summarize, or skip rows. Output the full data.
+3. Answer ONLY from the retrieved context. Do not use outside knowledge.
+4. Do not provide investment recommendations unless explicitly requested.
+5. Do not assume facts that are not present in the context.
+6. Do NOT introduce yourself. Do not say "I am a financial document analyst" or ask for a question. Just output the final answer directly.
+7. If the exact information is not available in the context, respond EXACTLY with: "The information is not available in the provided document."
+
+---
+DOCUMENT TEXT:
+{context}
+
+---
+USER QUERY: {query}
+
+CRITICAL INSTRUCTION: Based ONLY on the DOCUMENT TEXT above, fulfill the USER QUERY. Do not write anything else except the direct answer.
+FINAL ANSWER:"""
+            report = LLMHelper.generate_text(analysis_prompt, provider=self.provider, api_key=self.api_key)
+            
+            if "Error executing text generation" in report and ("429" in report or "quota" in report.lower()):
+                yield self._format_sse("rate_limit_error", "Gemini Free-Tier Rate Limit Hit (429). Please switch to OpenAI or Ollama.", 0, iteration)
+                yield self._format_sse("done", "Episode complete", 0, iteration)
+                return
+
+            yield self._format_sse("report", report, 0, iteration)
+            yield self._format_sse("done", "Episode complete", 0, iteration)
+            return
+
+        # Check Vector DB Cache first (Recommendation Branch)
+        yield self._format_sse("thought", "Checking Vector DB for cached answers...", 0, iteration)
+        try:
+            q_emb = LLMHelper.generate_embeddings([query], provider=self.provider, api_key=self.api_key)[0]
+            cached_results = self.vector_store.collection.query(
+                query_embeddings=[q_emb],
+                n_results=1,
+                where={"$and": [{"source_type": "cache"}, {"query": query}]}
+            )
+            if cached_results and cached_results.get('documents') and cached_results['documents'][0]:
+                doc = cached_results['documents'][0][0]
+                meta = cached_results['metadatas'][0][0]
+                cached_time_str = meta.get("timestamp", "")
+                if cached_time_str:
+                    # Handle python 3.10 fromisoformat which might not support the Z suffix properly if we used it, but we used standard isoformat
+                    # Actually standard isoformat doesn't have Z unless appended. In memory_store we did `.isoformat()`
+                    # but let's be safe:
+                    clean_time_str = cached_time_str.replace("Z", "+00:00")
+                    cached_time = datetime.datetime.fromisoformat(clean_time_str)
+                    # Convert to naive if it's aware to match utcnow(), or convert utcnow() to aware
+                    if cached_time.tzinfo is not None:
+                        cached_time = cached_time.replace(tzinfo=None)
+                    
+                    if (datetime.datetime.utcnow() - cached_time).total_seconds() < 86400:
+                        yield self._format_sse("observation", "Found valid cached report in Vector DB (under 24 hours old).", 0, iteration)
+                        
+                        # Retrieve and send the cached chart if it exists
+                        ticker_meta = meta.get("ticker", "")
+                        if ticker_meta and ticker_meta != "GENERIC":
+                            import os, base64
+                            chart_path = os.path.join(os.path.dirname(__file__), "..", "temp_charts", f"{ticker_meta}_chart.png")
+                            if os.path.exists(chart_path):
+                                try:
+                                    with open(chart_path, "rb") as image_file:
+                                        encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
+                                    yield self._format_sse("chart", f"data:image/png;base64,{encoded_string}", 0, iteration)
+                                except Exception as e:
+                                    pass
+
+                        yield self._format_sse("report", doc, 0, iteration)
+                        yield self._format_sse("done", "Episode complete (served from cache)", 0, iteration)
+                        return
+        except Exception as e:
+            yield self._format_sse("error", f"Cache lookup failed: {str(e)}", 0, iteration)
+
         # Stage 1: Local SEC Vector DB (Tier 1)
         if iteration < self.max_steps:
             yield self._format_sse("thought", "Search Stage 1: Querying local Vector DB for verified SEC Filings (Tier 1).", 1, iteration)
@@ -83,51 +193,6 @@ class ReActAgent:
             
             iteration += 1
 
-        # Stage 2: Tavily Web Search (Tier 2)
-        if not early_stopped and iteration < self.max_steps:
-            yield self._format_sse("thought", "Search Stage 2: Query not fully answered. Falling back to Tavily Web Search (Tier 2) for live internet data.", 2, iteration)
-            
-            yield self._format_sse("action", f"tavily_web_search(query='{query}')", 2, iteration)
-            tavily_results = tavily_web_search(query, max_results=3)
-            tools_used.append("tavily_web_search")
-            
-            if tavily_results:
-                top_snippet = tavily_results[0]["snippet"]
-                yield self._format_sse("observation", f"Tavily Search returned {len(tavily_results)} results. Top result: {top_snippet[:200]}...", 2, iteration)
-                accumulated_context += "Tavily Web Search (Tier 2):\n"
-                
-                # Semantic Caching: Store these web results into the Vector DB for future queries
-                web_chunks = []
-                web_metadata = []
-                for res in tavily_results:
-                    accumulated_context += f"- [{res['title']}] {res['snippet']} ({res['url']})\n"
-                    # Limit chunk size to ~800 chars for vector db
-                    chunk = res['snippet'][:800]
-                    web_chunks.append(chunk)
-                    web_metadata.append({
-                        "ticker": "WEB", 
-                        "tier": "Tier 2 (Web Cache)", 
-                        "source_name": res['title'], 
-                        "url": res['url']
-                    })
-                
-                # Generate embeddings and store
-                if web_chunks:
-                    try:
-                        web_emb = LLMHelper.generate_embeddings(web_chunks, provider=self.provider, api_key=self.api_key)
-                        self.vector_store.add_documents(web_chunks, web_emb, web_metadata)
-                        yield self._format_sse("thought", "Saved Tier 2 search results to local Vector DB for future semantic caching.", 2, iteration)
-                    except Exception as e:
-                        yield self._format_sse("error", f"Failed to cache web results: {str(e)}", 2, iteration)
-            else:
-                yield self._format_sse("observation", "Tavily Web Search returned no results.", 2, iteration)
-
-            if self._check_if_query_answered(query, accumulated_context):
-                early_stopped = True
-                stopping_stage = 2
-                yield self._format_sse("thought", "Query fully answered at Stage 2 (Tavily Web Search). Stopping search loop.", 2, iteration)
-                
-            iteration += 1
 
         if iteration >= self.max_steps:
             yield self._format_sse("error", "MAX_ITER overflow reached. Forcing report generation.", 0, iteration)
@@ -159,7 +224,8 @@ class ReActAgent:
                                 if clean_name.endswith(suffix):
                                     clean_name = clean_name[:-len(suffix)].strip()
                                     
-                            if clean_name in query.lower() and len(clean_name) > 2:
+                            import re
+                            if re.search(rf"\b{re.escape(clean_name)}\b", query.lower()) and len(clean_name) > 2:
                                 ticker = mapped_ticker
                                 yield self._format_sse("thought", f"Dynamically mapped '{company_name}' to ticker {ticker} from local registry.", 0, iteration)
                                 break
@@ -196,7 +262,42 @@ class ReActAgent:
         
         yield self._format_sse("observation", f"Math Engine Final Output: {json.dumps(engine_result)}", 0, iteration)
 
-        yield self._format_sse("thought", "Math engine execution complete. Compiling final report...", 0, iteration)
+        # Generate chart and evaluate sentiment only if requested
+        chart_sentiment = "UNAVAILABLE"
+        chart_path = None
+        wants_chart = any(word in query.lower() for word in ['chart', 'visual', 'graph', 'plot', 'candlestick'])
+        
+        if wants_chart:
+            yield self._format_sse("thought", "User requested visualization. Generating 2-month candlestick chart...", 0, iteration)
+            chart_path = generate_candlestick_chart(ticker)
+        
+        if chart_path:
+            yield self._format_sse("thought", "Evaluating visual market sentiment...", 0, iteration)
+            sentiment_prompt = "Analyze this 2-month candlestick chart. Evaluate the trend and reply with exactly one word representing the overall technical market sentiment: POSITIVE, NEGATIVE, or NEUTRAL."
+            raw_sentiment = LLMHelper.generate_text(sentiment_prompt, provider=self.provider, api_key=self.api_key, image_path=chart_path)
+            
+            if "Error executing text generation" in raw_sentiment and ("429" in raw_sentiment or "quota" in raw_sentiment.lower()):
+                yield self._format_sse("error", "Vision API limit exceeded. Skipping visual sentiment analysis.", 0, iteration)
+                chart_sentiment = "UNAVAILABLE"
+            else:
+                # Clean response to 1 word just in case
+                if "POSITIVE" in raw_sentiment.upper(): chart_sentiment = "POSITIVE"
+                elif "NEGATIVE" in raw_sentiment.upper(): chart_sentiment = "NEGATIVE"
+                elif "NEUTRAL" in raw_sentiment.upper(): chart_sentiment = "NEUTRAL"
+                else: chart_sentiment = "UNAVAILABLE"
+            
+            yield self._format_sse("observation", f"Visual Sentiment Output: {chart_sentiment}", 0, iteration)
+            
+            # Send chart image to frontend
+            try:
+                import base64
+                with open(chart_path, "rb") as image_file:
+                    encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
+                yield self._format_sse("chart", f"data:image/png;base64,{encoded_string}", 0, iteration)
+            except Exception as e:
+                yield self._format_sse("error", f"Failed to encode chart image: {str(e)}", 0, iteration)
+
+        yield self._format_sse("thought", "Math engine & chart execution complete. Compiling final report...", 0, iteration)
 
         # Basic report generation
         # Format large numbers to prevent LLM zero-counting hallucinations
@@ -220,12 +321,13 @@ class ReActAgent:
 
         prompt = f"""You are an elite, top-tier Wall Street Financial Analyst AI evaluating the stock {ticker}.
 
-Analyze the following computed scores and raw data.
+Analyze the following computed scores, chart sentiment, and raw data.
 Your goal is to write a highly impressive, sophisticated, and institutional-grade financial report. Use elegant, professional Wall Street terminology and speak with absolute authority. Do not use boring, robotic, or generic phrasing.
 
 ENGINE OUTPUT:
 Final Score: {engine_result.get('final_score', 50):.1f}/100
 Recommendation: {engine_result.get('recommendation', 'HOLD')}
+Technical Chart Sentiment (2-Month): {chart_sentiment}
 
 Category Scores:
 - Growth Score: {engine_result.get('growth_score', 50)}
@@ -265,17 +367,39 @@ Report Format:
 """
         report = LLMHelper.generate_text(prompt, provider=self.provider, api_key=self.api_key)
         
+        if "Error executing text generation" in report and ("429" in report or "quota" in report.lower()):
+            yield self._format_sse("rate_limit_error", "Gemini Free-Tier Rate Limit Hit (429). Please switch to OpenAI or Ollama.", 0, iteration)
+            yield self._format_sse("done", "Episode complete", 0, iteration)
+            return
+
         yield self._format_sse("report", report, 0, iteration)
 
+        # Save report to Vector DB Cache
+        try:
+            cache_meta = [{
+                "source_type": "cache",
+                "tier": "Cache",
+                "ticker": ticker or "GENERIC",
+                "source_name": "Agent Cache",
+                "query": query,
+                "timestamp": datetime.datetime.utcnow().isoformat()
+            }]
+            # We use q_emb if available, otherwise generate it
+            c_emb = LLMHelper.generate_embeddings([query], provider=self.provider, api_key=self.api_key)[0]
+            self.vector_store.add_documents([report], [c_emb], cache_meta)
+        except Exception as e:
+            yield self._format_sse("error", f"Failed to cache final report: {str(e)}", 0, iteration)
+
         status_str = "EARLY_STOPPED" if early_stopped else "SUCCESS"
-        self.episodic_memory.log_episode(
-            episode_id=f"EP-{random.randint(1000, 9999)}",
-            query=query,
-            status=status_str,
-            tools_used=tools_used,
-            failures=failures,
-            recovery=recovery,
-            strategy=f"2-Tier strategy executed. Early stopped: {early_stopped} at Stage {stopping_stage}."
-        )
+        if not early_stopped:
+            self.episodic_memory.log_episode(
+                episode_id=f"EP-{random.randint(1000, 9999)}",
+                query=query,
+                status=status_str,
+                tools_used=tools_used,
+                failures=failures,
+                recovery=recovery,
+                strategy=f"2-Tier strategy executed. Early stopped: {early_stopped} at Stage {stopping_stage}."
+            )
 
         yield self._format_sse("done", "Episode complete", 0, iteration)
