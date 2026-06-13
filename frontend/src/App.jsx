@@ -16,8 +16,7 @@ import {
 import ChatConsole from './components/ChatConsole.jsx';
 import PipelineStatus from './components/PipelineStatus.jsx';
 import ReportViewer from './components/ReportViewer.jsx';
-import DocManager from './components/DocManager.jsx';
-import ConflictResolver from './components/ConflictResolver.jsx';
+import ChartVault from './components/ChartVault.jsx';
 import MemoryVault from './components/MemoryVault.jsx';
 import SettingsDrawer from './components/SettingsDrawer.jsx';
 
@@ -25,13 +24,12 @@ import {
   mockStocks, 
   mockReActLogs, 
   mockReports, 
-  mockConflictLogs, 
   mockEpisodicMemory, 
   mockVectorDB 
 } from './mockData';
 
 export default function App() {
-  // Navigation tab states: 'terminal' | 'conflicts' | 'memory' | 'ingestion'
+  // Navigation tab states: 'terminal' | 'memory' | 'charts'
   const [activeTab, setActiveTab] = useState('terminal');
   
   // Settings Drawer state
@@ -60,6 +58,7 @@ export default function App() {
   const [activeTier, setActiveTier] = useState(0); // 0 = Idle, 1 = SEC, 2 = Web, 3 = News, 4 = Media
   const [loading, setLoading] = useState(false);
   const [activeReport, setActiveReport] = useState(null);
+  const [rateLimitModalOpen, setRateLimitModalOpen] = useState(false);
 
   // Database lists populated from live backend
   const [episodicMemory, setEpisodicMemory] = useState([]);
@@ -69,13 +68,13 @@ export default function App() {
   useEffect(() => {
     const fetchMemoryData = async () => {
       try {
-        const epRes = await fetch("http://localhost:7860/api/episodes", { headers: { "X-API-Key": "test_key" } });
+        const epRes = await fetch(`${API_BASE_URL}/api/episodes`, { headers: { "X-API-Key": "test_key" } });
         if (epRes.ok) {
           const epData = await epRes.json();
           setEpisodicMemory(epData);
         }
 
-        const vecRes = await fetch("http://localhost:7860/api/vectors", { headers: { "X-API-Key": "test_key" } });
+        const vecRes = await fetch(`${API_BASE_URL}/api/vectors`, { headers: { "X-API-Key": "test_key" } });
         if (vecRes.ok) {
           const vecData = await vecRes.json();
           setVectorDB(vecData);
@@ -86,15 +85,6 @@ export default function App() {
     };
     fetchMemoryData();
   }, []);
-  
-  // Custom uploaded/pulled documents list
-  const [documents, setDocuments] = useState([
-    { name: "AAPL_10K_FY2024.pdf", size: "8.4 MB", chunks: 1420 },
-    { name: "MSFT_10K_FY2024.pdf", size: "11.2 MB", chunks: 1845 },
-    { name: "TSLA_10K_FY2024.pdf", size: "6.1 MB", chunks: 924 },
-    { name: "GS_10K_FY2024.pdf", size: "9.7 MB", chunks: 1680 }
-  ]);
-  const [uploadLoading, setUploadLoading] = useState(false);
 
   // Suggested prompts
   const suggestedQueries = [
@@ -141,7 +131,7 @@ export default function App() {
     if (!query.trim()) return;
 
     setLoading(true);
-    setLogs([]);
+    setLogs(prev => [...prev, { type: 'user', text: query }]);
     setActiveReport(null);
     setActiveTier(0);
 
@@ -152,7 +142,7 @@ export default function App() {
 
     try {
       // 1. Attempt connection to live FastAPI backend
-      const response = await fetch("http://localhost:7860/api/research", {
+      const response = await fetch(`${API_BASE_URL}/api/research`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -184,6 +174,8 @@ export default function App() {
               } else if (nextLog.text.includes('yfinance_api')) {
                 setActiveTier(2);
               }
+            } else if (nextLog.type === 'rate_limit_error') {
+              setRateLimitModalOpen(true);
             }
 
             currentLogIndex++;
@@ -236,56 +228,44 @@ export default function App() {
     setQuery('');
   };
 
-  // SEC Ticker filings pull simulation removed as part of V2.0
-
-  // Real document upload to backend with Authenticity Scan
-  const handleDocUpload = async (file) => {
-    setUploadLoading(true);
+  const handleFileUpload = async (file) => {
+    if (!file) return;
+    setLoading(true);
+    setLogs(prev => [...prev, { type: 'user', text: `Uploaded Document: ${file.name}` }]);
+    
     const formData = new FormData();
     formData.append("file", file);
 
+    const providerKey = settings.provider === 'gemini' ? settings.geminiKey : (settings.provider === 'groq' ? settings.groqKey : settings.openaiKey);
+
     try {
-      const response = await fetch("http://localhost:7860/api/upload", {
+      const response = await fetch(`${API_BASE_URL}/api/upload`, {
         method: "POST",
         headers: {
           "x-llm-provider": settings.provider,
-          "x-llm-api-key": settings.provider === 'gemini' ? settings.geminiKey : (settings.provider === 'groq' ? settings.groqKey : settings.openaiKey),
+          "x-llm-api-key": providerKey || "",
           "X-API-Key": "test_key"
         },
         body: formData
       });
 
       if (!response.ok) {
-        const errData = await response.json().catch(() => null);
-        throw new Error(errData?.detail || `Upload failed with status ${response.status}`);
+        let errorMsg = `Server returned ${response.status}`;
+        try {
+          const errData = await response.json();
+          if (errData.detail) errorMsg = errData.detail;
+        } catch(e) {}
+        throw new Error(errorMsg);
       }
 
-      const result = await response.json();
-      
-      setDocuments(prev => [
-        { name: result.filename, size: result.size, chunks: result.chunks },
-        ...prev
-      ]);
-      
-      // Notify memory/vector UI
-      const newVec = {
-        id: `vec_${Math.floor(100 + Math.random() * 900)}`,
-        ticker: "CUSTOM",
-        tier: "Tier 1 (SEC Filing)",
-        snippet: `Successfully uploaded and verified ${result.filename} with SEC Authenticity Checker...`,
-        vector: "[Embedded]"
-      };
-      setVectorDB(prev => [newVec, ...prev]);
-
-      alert(`Successfully uploaded ${result.filename}! (${result.chunks} chunks stored)`);
-
+      const data = await response.json();
+      setLogs(prev => [...prev, { type: 'observation', text: `System: ${data.message}` }]);
     } catch (err) {
-      alert(err.message);
+      setLogs(prev => [...prev, { type: 'error', text: `Upload Error: ${err.message}` }]);
     } finally {
-      setUploadLoading(false);
+      setLoading(false);
     }
   };
-
 
   const activeStockData = mockStocks[selectedStock];
 
@@ -312,10 +292,7 @@ export default function App() {
         {/* Global Stats bar */}
         <div className="hidden lg:flex items-center gap-6 font-mono text-[10px] text-slate-500 border-l border-r border-[#242f49] px-6">
           <div>
-            CORE LLM: <span className="text-white font-bold">{settings.provider === 'gemini' ? 'Gemini 1.5 Flash' : 'GPT-4o'}</span>
-          </div>
-          <div>
-            MEMORY VECTORS: <span className="text-[#8b5cf6] font-bold">{documents.reduce((acc, d) => acc + d.chunks, 0)} Chunks</span>
+            CORE LLM: <span className="text-white font-bold">{settings.provider === 'gemini' ? 'Gemini 2.5 Flash' : (settings.provider === 'ollama' ? 'Local Ollama' : 'GPT-4o')}</span>
           </div>
           <div>
             MARKET DATA: <span className="text-[#10b981] font-bold">Yahoo Finance Active</span>
@@ -325,10 +302,10 @@ export default function App() {
         {/* Settings and Info */}
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1 bg-[#0b0f17] border border-[#242f49] rounded px-2.5 py-1 text-[10px] font-semibold text-slate-400">
-            {settings.geminiKey || settings.openaiKey || settings.groqKey ? (
+            {settings.provider === 'gemini' || settings.openaiKey || settings.groqKey ? (
               <>
                 <Unlock className="h-3 w-3 text-[#10b981]" />
-                <span className="text-slate-300">Keys Activated</span>
+                <span className="text-slate-300">{settings.provider === 'gemini' ? 'Inbuilt Key Active' : 'Keys Activated'}</span>
               </>
             ) : (
               <>
@@ -371,17 +348,6 @@ export default function App() {
                   <span>Research Terminal</span>
                 </button>
                 <button
-                  onClick={() => setActiveTab('conflicts')}
-                  className={`w-full text-left py-2 px-3 rounded text-xs font-medium flex items-center gap-2.5 transition-all ${
-                    activeTab === 'conflicts'
-                      ? 'bg-[#ef4444]/15 text-[#ef4444] border-l-2 border-[#ef4444]'
-                      : 'text-slate-400 hover:bg-[#1a2234] hover:text-white'
-                  }`}
-                >
-                  <GitMerge className="h-4 w-4" />
-                  <span>Conflict Lab</span>
-                </button>
-                <button
                   onClick={() => setActiveTab('memory')}
                   className={`w-full text-left py-2 px-3 rounded text-xs font-medium flex items-center gap-2.5 transition-all ${
                     activeTab === 'memory'
@@ -393,15 +359,15 @@ export default function App() {
                   <span>Memory Vault</span>
                 </button>
                 <button
-                  onClick={() => setActiveTab('ingestion')}
+                  onClick={() => setActiveTab('charts')}
                   className={`w-full text-left py-2 px-3 rounded text-xs font-medium flex items-center gap-2.5 transition-all ${
-                    activeTab === 'ingestion'
-                      ? 'bg-[#3b82f6]/15 text-[#3b82f6] border-l-2 border-[#3b82f6]'
+                    activeTab === 'charts'
+                      ? 'bg-[#f59e0b]/15 text-[#f59e0b] border-l-2 border-[#f59e0b]'
                       : 'text-slate-400 hover:bg-[#1a2234] hover:text-white'
                   }`}
                 >
                   <FileCode className="h-4 w-4" />
-                  <span>Filings Portal</span>
+                  <span>Chart Vault</span>
                 </button>
               </div>
             </div>
@@ -464,16 +430,12 @@ export default function App() {
                   onSubmit={handleExecute}
                   onReset={handleResetSession}
                   suggestedQueries={suggestedQueries}
+                  onFileUpload={handleFileUpload}
                 />
                 
                 <ReportViewer report={activeReport} />
               </div>
             </>
-          )}
-
-          {/* Tab 2: Conflict Lab */}
-          {activeTab === 'conflicts' && (
-            <ConflictResolver conflicts={mockConflictLogs} />
           )}
 
           {/* Tab 3: Memory Vault Databases */}
@@ -484,13 +446,9 @@ export default function App() {
             />
           )}
 
-          {/* Tab 4: Ingestion Documents Portal */}
-          {activeTab === 'ingestion' && (
-            <DocManager 
-              documents={documents}
-              onUpload={handleDocUpload}
-              uploadLoading={uploadLoading}
-            />
+          {/* Tab 4: Chart Vault */}
+          {activeTab === 'charts' && (
+            <ChartVault />
           )}
 
         </main>
@@ -506,6 +464,49 @@ export default function App() {
         settings={settings}
         onSave={setSettings}
       />
+
+      {/* Rate Limit Recovery Modal */}
+      {rateLimitModalOpen && (
+        <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4">
+           <div className="bg-[#121824] border border-[#ef4444]/40 p-6 rounded shadow-xl w-full max-w-sm flex flex-col gap-4">
+             <div className="flex items-center gap-2">
+               <ShieldCheck className="h-6 w-6 text-[#ef4444]" />
+               <h2 className="text-white font-bold text-lg">API Rate Limit Hit</h2>
+             </div>
+             <p className="text-slate-400 text-xs">
+               The Gemini Free-Tier API quota has been exceeded (429 Error). Would you like to automatically switch to a different LLM provider to continue your research?
+             </p>
+             <div className="flex flex-col gap-2 mt-2">
+               <button 
+                 onClick={() => { 
+                   setSettings(prev => ({...prev, provider: 'openai'})); 
+                   setRateLimitModalOpen(false); 
+                   setTimeout(handleExecute, 300); // Retry after state updates
+                 }} 
+                 className="w-full bg-[#10b981] hover:bg-[#059669] text-white py-2 rounded text-xs font-bold transition-colors"
+               >
+                 Switch to OpenAI & Retry
+               </button>
+               <button 
+                 onClick={() => { 
+                   setSettings(prev => ({...prev, provider: 'ollama'})); 
+                   setRateLimitModalOpen(false); 
+                   setTimeout(handleExecute, 300);
+                 }} 
+                 className="w-full bg-[#8b5cf6] hover:bg-[#7c3aed] text-white py-2 rounded text-xs font-bold transition-colors"
+               >
+                 Switch to Local Ollama & Retry
+               </button>
+               <button 
+                 onClick={() => setRateLimitModalOpen(false)} 
+                 className="w-full bg-transparent border border-slate-600 hover:border-white text-slate-300 hover:text-white py-2 rounded text-xs font-bold transition-colors mt-2"
+               >
+                 Cancel
+               </button>
+             </div>
+           </div>
+        </div>
+      )}
     </div>
   );
 }

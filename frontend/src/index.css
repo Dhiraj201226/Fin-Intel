@@ -182,3 +182,37 @@ body {
   border-radius: 50%;
   display: inline-block;
 }
+
+/* Markdown Table Styles */
+.markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  font-size: 0.85rem;
+  background-color: var(--bg-tertiary);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.markdown-body th {
+  background-color: #1f2937;
+  color: var(--text-primary);
+  font-weight: 600;
+  text-align: left;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.markdown-body td {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.markdown-body tr:last-child td {
+  border-bottom: none;
+}
+
+.markdown-body tr:hover td {
+  background-color: rgba(255, 255, 255, 0.03);
+}

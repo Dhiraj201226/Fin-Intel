@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { FileCheck, TrendingUp, TrendingDown } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 export default function ReportViewer({ report }) {
   const [activeTab, setActiveTab] = useState('summary');
@@ -29,8 +31,10 @@ export default function ReportViewer({ report }) {
           </div>
         </div>
         <div className="flex-1 p-5 overflow-y-auto bg-[#0b0f17]">
-          <div className="text-xs text-slate-300 leading-relaxed font-sans whitespace-pre-wrap">
-            {report}
+          <div className="markdown-body text-xs text-slate-300 leading-relaxed font-sans">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {report}
+            </ReactMarkdown>
           </div>
         </div>
       </div>

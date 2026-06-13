@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import { Send, Terminal, Play, Cpu, HelpCircle, RefreshCw } from 'lucide-react';
+import { Send, Terminal, Play, Cpu, HelpCircle, RefreshCw, Paperclip } from 'lucide-react';
 
 export default function ChatConsole({ 
   logs, 
@@ -8,9 +8,11 @@ export default function ChatConsole({
   setQuery, 
   onSubmit, 
   onReset,
-  suggestedQueries 
+  suggestedQueries,
+  onFileUpload
 }) {
   const logEndRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -76,7 +78,15 @@ export default function ChatConsole({
         ) : (
           <div className="space-y-4">
             {logs.map((log, idx) => {
-              if (log.type === "thought") {
+              if (log.type === "user") {
+                return (
+                  <div key={idx} className="flex justify-end my-2">
+                    <div className="bg-[#10b981]/20 border border-[#10b981]/40 text-slate-200 px-3 py-2 rounded-lg max-w-[85%] text-[11px] font-sans break-words shadow-sm">
+                      {log.text}
+                    </div>
+                  </div>
+                );
+              } else if (log.type === "thought") {
                 return (
                   <div key={idx} className="border-l-2 border-[#f59e0b] pl-3 py-0.5">
                     <span className="text-[#f59e0b] font-bold block mb-1">🧠 [THOUGHT]</span>
@@ -118,6 +128,31 @@ export default function ChatConsole({
                     </div>
                   </div>
                 );
+              } else if (log.type === "chart") {
+                return (
+                  <div key={idx} className="bg-[#10b981]/5 border border-[#10b981]/20 rounded p-2.5 flex items-start gap-2.5">
+                    <span className="bg-[#10b981]/15 text-[#10b981] p-1 rounded font-bold text-[9px] font-mono select-none">
+                      CHART
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <img src={log.text} alt="Candlestick Chart" className="w-full rounded border border-[#242f49] shadow-lg max-w-2xl mt-1" />
+                    </div>
+                  </div>
+                );
+              } else if (log.type === "report") {
+                return (
+                  <div key={idx} className="bg-[#8b5cf6]/5 border border-[#8b5cf6]/20 rounded p-3 my-2 flex flex-col gap-1.5 shadow-sm">
+                    <div className="flex items-center gap-1.5 border-b border-[#8b5cf6]/20 pb-1">
+                      <Cpu className="h-3.5 w-3.5 text-[#8b5cf6]" />
+                      <span className="text-[#8b5cf6] font-bold text-[10px] uppercase tracking-widest font-mono">
+                        Agent Final Output
+                      </span>
+                    </div>
+                    <div className="text-slate-300 font-sans text-xs leading-relaxed whitespace-pre-wrap mt-1">
+                      {log.text}
+                    </div>
+                  </div>
+                );
               }
               return null;
             })}
@@ -142,6 +177,28 @@ export default function ChatConsole({
           }}
           className="flex items-center gap-2"
         >
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            className="hidden" 
+            accept="application/pdf"
+            onChange={(e) => {
+              if (e.target.files && e.target.files.length > 0) {
+                onFileUpload(e.target.files[0]);
+                e.target.value = null; // Reset input
+              }
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={loading}
+            className="p-1.5 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition-colors shrink-0"
+            title="Upload Document for Analysis"
+          >
+            <Paperclip className="h-4 w-4" />
+          </button>
+          
           <span className="font-mono text-[#10b981] font-semibold text-xs pl-1 select-none">
             $
           </span>
@@ -150,7 +207,7 @@ export default function ChatConsole({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             disabled={loading}
-            placeholder="Search company (e.g. AAPL) or type query, e.g. Evaluate TSLA margin issues..."
+            placeholder="Upload PDF or type query..."
             className="flex-1 bg-transparent border-none text-xs text-white placeholder-slate-600 focus:outline-none py-1.5"
           />
           <button

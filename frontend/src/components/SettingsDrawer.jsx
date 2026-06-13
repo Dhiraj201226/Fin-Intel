@@ -61,7 +61,7 @@ export default function SettingsDrawer({ isOpen, onClose, settings, onSave }) {
         </div>
 
         {/* API Key Input */}
-        {settings.provider !== 'ollama' && (
+        {settings.provider !== 'ollama' && settings.provider !== 'gemini' && (
           <div className="space-y-2">
             <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1">
               <Key className="h-3.5 w-3.5" />

@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Database, FileCode, CheckCircle, AlertTriangle, Layers, Search, Cpu, Trash2 } from 'lucide-react';
 
+const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:7860";
+
 export default function MemoryVault({ episodicLogs, vectorLogs }) {
   const [subTab, setSubTab] = useState('episodic');
   const [search, setSearch] = useState('');
@@ -19,6 +21,20 @@ export default function MemoryVault({ episodicLogs, vectorLogs }) {
     (log.tier || '').toLowerCase().includes(search.toLowerCase())
   );
 
+  const handleDeleteItem = async (type, id) => {
+    if (window.confirm(`Delete this ${type} memory permanently?`)) {
+      try {
+        await fetch(`${API_BASE_URL}/api/memory/${type}/${id}`, {
+          method: "DELETE",
+          headers: { "X-API-Key": "test_key" }
+        });
+        window.location.reload();
+      } catch (err) {
+        alert("Failed to delete: " + err.message);
+      }
+    }
+  };
+
   return (
     <div className="glass-panel p-5 flex flex-col gap-4 min-h-0 overflow-hidden">
       {/* Header */}
@@ -36,7 +52,7 @@ export default function MemoryVault({ episodicLogs, vectorLogs }) {
           onClick={async () => {
             if (window.confirm("Are you sure you want to permanently delete all Memory Vault databases?")) {
               try {
-                await fetch("http://localhost:7860/api/memory", { method: "DELETE" });
+                await fetch(`${API_BASE_URL}/api/memory`, { method: "DELETE" });
                 window.location.reload();
               } catch(e) {
                 console.error(e);
@@ -101,7 +117,12 @@ export default function MemoryVault({ episodicLogs, vectorLogs }) {
                 <div key={idx} className="border border-[#242f49] rounded p-3 bg-[#121824]/20 space-y-2">
                   <div className="flex justify-between items-center border-b border-[#242f49] pb-1.5">
                     <span className="text-[#8b5cf6] font-bold">{log.id}</span>
-                    <span className="text-slate-500">{log.timestamp}</span>
+                    <div className="flex items-center gap-3">
+                      <span className="text-slate-500">{log.timestamp}</span>
+                      <button onClick={() => handleDeleteItem('episodic', log.id)} className="text-slate-500 hover:text-[#ef4444] transition-colors">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                     <div>
@@ -163,7 +184,12 @@ export default function MemoryVault({ episodicLogs, vectorLogs }) {
                         {log.ticker}
                       </span>
                     </div>
-                    <span className="text-slate-500 font-bold">{log.tier}</span>
+                    <div className="flex items-center gap-3">
+                      <span className="text-slate-500 font-bold">{log.tier}</span>
+                      <button onClick={() => handleDeleteItem('vector', log.id)} className="text-slate-500 hover:text-[#ef4444] transition-colors">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </div>
                   <div>
                     <span className="text-slate-500 block mb-1">Vector Coordinates (1536-dim snippet):</span>
