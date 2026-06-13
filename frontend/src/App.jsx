@@ -28,6 +28,8 @@ import {
   mockVectorDB 
 } from './mockData';
 
+const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:7860";
+
 export default function App() {
   // Navigation tab states: 'terminal' | 'memory' | 'charts'
   const [activeTab, setActiveTab] = useState('terminal');
