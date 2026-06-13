@@ -105,13 +105,15 @@ export default function App() {
     }
 
     // Look for a standard 1-5 letter uppercase ticker symbol in parentheses or standing alone
-    // e.g. "What is (NVDA) doing?" or "Analyze META"
-    const match = q.match(/\b([A-Z]{1,5})\b/);
-    if (match) {
+    // Find all 1-5 letter all-caps words bounded by spaces
+    const matches = q.match(/\b([A-Z]{1,5})\b/g);
+    if (matches) {
       // Exclude common ALL CAPS words that aren't tickers
-      const exclusions = ["WHAT", "HOW", "WHY", "IS", "THE", "A", "AN", "AND", "OR", "IF", "IT"];
-      if (!exclusions.includes(match[1])) {
-        return match[1];
+      const exclusions = ["WHAT", "HOW", "WHY", "IS", "THE", "A", "AN", "AND", "OR", "IF", "IT", "ABOUT", "BUY", "SELL", "STOCK", "ON", "FOR", "IN", "TO", "OF"];
+      for (const match of matches) {
+        if (!exclusions.includes(match)) {
+          return match;
+        }
       }
     }
     
