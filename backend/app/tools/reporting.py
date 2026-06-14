@@ -74,6 +74,8 @@ CRITICAL RULES:
 - Do NOT hallucinate. Ground your claims in the SEC filng facts and yFinance stats provided.
 - Ensure the output is clean JSON that can be parsed directly in Python using json.loads().
 - Maintain an objective, neutral, and professional tone at all times. Do NOT use overly negative or alarmist language (e.g., avoid saying a company is "risky" or "bad"). Instead, state that metrics are "comparatively lower" or face "headwinds" due to specific contributing factors.
+- If a company's financial press release explicitly states metrics like EBITDA, EBIT, Net Debt-to-Equity, or Working Capital Cycles, prioritize extracting those declared figures directly instead of attempting to calculate them from basic line items.
+- Pay strict attention to negative signs (-) in financial figures. A negative Net Debt means the company has more cash than debt. Never ignore negative signs or treat them as punctuation dashes.
 """
         
         response_text = LLMHelper.generate_text(system_prompt, provider=provider, api_key=api_key)
