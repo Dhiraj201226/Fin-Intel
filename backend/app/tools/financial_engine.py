@@ -268,7 +268,7 @@ class FinancialRecommendationEngine:
         if final_score >= 75:
             reasoning.append(f"The calculated score of {final_score:.1f} indicates strong overall fundamentals.")
         elif final_score <= 59:
-            reasoning.append(f"The calculated score of {final_score:.1f} highlights significant risks or overvaluation.")
+            reasoning.append(f"The calculated score of {final_score:.1f} is comparatively low due to contributing factors.")
         else:
             reasoning.append(f"The calculated score of {final_score:.1f} suggests a neutral or mixed outlook.")
 
@@ -282,11 +282,11 @@ class FinancialRecommendationEngine:
             reasoning.append(f"{best_category.title()} contributed most positively with a sub-score of {best_score:.1f}.")
             
             if worst_score < 50:
-                reasoning.append(f"{worst_category.title()} represents a significant risk, dragging the score down with a sub-score of {worst_score:.1f}.")
+                reasoning.append(f"{worst_category.title()} scored comparatively lower at {worst_score:.1f}, acting as a headwind to the overall score.")
 
         
         if "debt_to_equity" in metrics and metrics["debt_to_equity"] > 2.0:
-            reasoning.append("High debt-to-equity ratio is negatively impacting the financial health score.")
+            reasoning.append("An elevated debt-to-equity ratio is a contributing factor to the lower financial health score.")
 
         return {
             "ticker": ticker,

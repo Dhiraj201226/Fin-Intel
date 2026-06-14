@@ -73,6 +73,7 @@ CRITICAL RULES:
 - Use brackets like [1], [2] to link claims back to the factual source index list provided.
 - Do NOT hallucinate. Ground your claims in the SEC filng facts and yFinance stats provided.
 - Ensure the output is clean JSON that can be parsed directly in Python using json.loads().
+- Maintain an objective, neutral, and professional tone at all times. Do NOT use overly negative or alarmist language (e.g., avoid saying a company is "risky" or "bad"). Instead, state that metrics are "comparatively lower" or face "headwinds" due to specific contributing factors.
 """
         
         response_text = LLMHelper.generate_text(system_prompt, provider=provider, api_key=api_key)
