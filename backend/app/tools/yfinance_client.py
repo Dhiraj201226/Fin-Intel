@@ -8,7 +8,10 @@ logger = logging.getLogger(__name__)
 def fetch_yfinance_facts(ticker: str) -> dict:
     """Fetches core financial metrics using yfinance."""
     try:
-        stock = yf.Ticker(ticker)
+        import requests
+        session = requests.Session()
+        session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+        stock = yf.Ticker(ticker, session=session)
         inc = stock.income_stmt
         bal = stock.balance_sheet
         cf = stock.cashflow
@@ -103,7 +106,10 @@ def fetch_yfinance_facts(ticker: str) -> dict:
 def generate_candlestick_chart(ticker: str) -> str:
     """Fetches 2 months of daily data and saves a candlestick chart."""
     try:
-        stock = yf.Ticker(ticker)
+        import requests
+        session = requests.Session()
+        session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+        stock = yf.Ticker(ticker, session=session)
         df = stock.history(period="2mo", interval="1d")
         
         if df.empty:
