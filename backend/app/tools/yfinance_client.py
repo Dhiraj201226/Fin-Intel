@@ -1,5 +1,7 @@
 import yfinance as yf
 import logging
+import os
+import mplfinance as mpf
 
 logger = logging.getLogger(__name__)
 
@@ -97,3 +99,30 @@ def fetch_yfinance_facts(ticker: str) -> dict:
     except Exception as e:
         logger.error(f"Failed to fetch yfinance data for {ticker}: {str(e)}")
         return {"error": str(e)}
+
+def generate_candlestick_chart(ticker: str) -> str:
+    """Fetches 2 months of daily data and saves a candlestick chart."""
+    try:
+        stock = yf.Ticker(ticker)
+        df = stock.history(period="2mo", interval="1d")
+        
+        if df.empty:
+            logger.error(f"No historical data found to generate chart for {ticker}")
+            return ""
+            
+        # Ensure directory exists for charts
+        charts_dir = os.path.join(os.path.dirname(__file__), "..", "..", "temp_charts")
+        os.makedirs(charts_dir, exist_ok=True)
+        
+        filepath = os.path.join(charts_dir, f"{ticker}_chart.png")
+        
+        # Save candlestick chart
+        mpf.plot(df, type='candle', style='yahoo', 
+                 title=f'{ticker} - 2 Month Candlestick Chart',
+                 ylabel='Price', volume=False, 
+                 savefig=dict(fname=filepath, dpi=100, bbox_inches='tight'))
+                 
+        return filepath
+    except Exception as e:
+        logger.error(f"Failed to generate candlestick chart for {ticker}: {str(e)}")
+        return ""

@@ -8,7 +8,7 @@ from app.config import DB_PATH
 class APIKeyAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         # Exempt paths
-        if request.url.path in ["/", "/api/health", "/docs", "/openapi.json"]:
+        if request.url.path in ["/", "/api/health", "/docs", "/openapi.json"] or request.url.path.startswith("/api/charts/"):
             return await call_next(request)
 
         # Allow CORS preflight requests

@@ -3,14 +3,15 @@ import time
 import google.generativeai as genai
 from openai import OpenAI
 import numpy as np
+from PIL import Image
 from app.config import GEMINI_API_KEY, OPENAI_API_KEY
 
 class LLMHelper:
     """Helper to route prompts and embedding generation to Gemini or OpenAI."""
     
     @staticmethod
-    def generate_text(prompt, provider="gemini", api_key=None, temperature=0.3):
-        """Generates text from selected LLM provider."""
+    def generate_text(prompt, provider="gemini", api_key=None, temperature=0.3, image_path=None):
+        """Generates text from selected LLM provider, with optional multimodal support."""
         # Clean keys
         key = api_key if api_key else (GEMINI_API_KEY if provider == "gemini" else OPENAI_API_KEY)
         
@@ -33,9 +34,15 @@ Based on our simulated data extraction, the company is showing strong fundamenta
             try:
                 if provider == "gemini":
                     genai.configure(api_key=key)
-                    # Using Gemini 1.5 Flash for best speed and 15 Requests Per Minute quota limit
-                    model = genai.GenerativeModel('gemini-1.5-flash', generation_config={"temperature": temperature})
-                    response = model.generate_content(prompt)
+                    # Using Gemini 2.5 Flash for best speed and 15 Requests Per Minute quota limit
+                    model = genai.GenerativeModel('gemini-2.5-flash', generation_config={"temperature": temperature})
+                    
+                    if image_path and os.path.exists(image_path):
+                        img = Image.open(image_path)
+                        response = model.generate_content([prompt, img])
+                    else:
+                        response = model.generate_content(prompt)
+                        
                     return response.text
                 elif provider == "ollama":
                     client = OpenAI(base_url="http://localhost:11434/v1", api_key="ollama")
@@ -93,30 +100,39 @@ Based on our simulated data extraction, the company is showing strong fundamenta
             if provider == "gemini":
                 genai.configure(api_key=key)
                 embeddings = []
-                for chunk in text_chunks:
+                total_chunks = len(text_chunks)
+                print(f"Starting Gemini embeddings for {total_chunks} chunks...")
+                for idx, chunk in enumerate(text_chunks):
+                    if idx % 50 == 0 and idx > 0:
+                        print(f"Embedded {idx}/{total_chunks} chunks...")
                     result = genai.embed_content(
                         model="models/embedding-001",
                         content=chunk,
                         task_type="retrieval_document"
                     )
                     embeddings.append(result['embedding'])
+                print("Gemini embeddings complete!")
                 return embeddings
             elif provider == "ollama":
-                # Ollama embeddings using nomic-embed-text (ensure you run `ollama pull nomic-embed-text`)
-                # If it fails, the exception block will smoothly fallback to hash mock embeddings
                 client = OpenAI(base_url="http://localhost:11434/v1", api_key="ollama")
-                response = client.embeddings.create(
-                    input=text_chunks,
-                    model="nomic-embed-text"
-                )
-                return [data.embedding for data in response.data]
+                embeddings = []
+                total_chunks = len(text_chunks)
+                print(f"Starting Ollama local embeddings for {total_chunks} chunks. This will take time depending on your CPU/GPU...")
+                for i in range(0, total_chunks, 50):
+                    print(f"Processing Ollama batch: {i} to {min(i+50, total_chunks)} out of {total_chunks}...")
+                    batch = text_chunks[i:i+50]
+                    response = client.embeddings.create(input=batch, model="nomic-embed-text")
+                    embeddings.extend([data.embedding for data in response.data])
+                print("Ollama embeddings complete!")
+                return embeddings
             else:
                 client = OpenAI(api_key=key)
-                response = client.embeddings.create(
-                    input=text_chunks,
-                    model="text-embedding-3-small"
-                )
-                return [data.embedding for data in response.data]
+                embeddings = []
+                for i in range(0, len(text_chunks), 50):
+                    batch = text_chunks[i:i+50]
+                    response = client.embeddings.create(input=batch, model="text-embedding-3-small")
+                    embeddings.extend([data.embedding for data in response.data])
+                return embeddings
         except Exception as e:
             print(f"Error generating embeddings, falling back to hashes: {str(e)}")
             # Fallback on hash embeddings to prevent crashes

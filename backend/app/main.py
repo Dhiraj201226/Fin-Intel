@@ -3,8 +3,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import os
 import json
-import PyPDF2
+import re
 from typing import Optional
+import fitz  # PyMuPDF
+import datetime
 
 from sse_starlette.sse import EventSourceResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -14,8 +16,8 @@ from slowapi.errors import RateLimitExceeded
 from app.agent import ReActAgent
 from app.memory_store import EpisodicMemory, ChromaVectorStore
 from app.llm_helper import LLMHelper
-from app.config import DOCUMENTS_DIR
 from app.auth import APIKeyAuthMiddleware
+from fastapi.staticfiles import StaticFiles
 
 limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(title="ARA-1 Autonomous Financial Research Agent Backend")
@@ -32,6 +34,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount the static charts directory
+charts_dir = os.path.join(os.path.dirname(__file__), "..", "temp_charts")
+os.makedirs(charts_dir, exist_ok=True)
+app.mount("/api/charts", StaticFiles(directory=charts_dir), name="charts")
 
 class ResearchRequest(BaseModel):
     query: str
@@ -115,111 +122,157 @@ def delete_memory(x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
                 pass
     return {"status": "success", "message": "Memory deleted successfully."}
 
+@app.delete("/api/memory/episodic/{id}")
+def delete_episodic_memory(id: str, x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
+    """Deletes a single episodic memory."""
+    ep_mem = EpisodicMemory()
+    ep_mem.delete_episode(id)
+    return {"status": "success"}
 
+@app.delete("/api/memory/vector/{id}")
+def delete_vector_memory(id: str, x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
+    """Deletes a single vector from ChromaDB."""
+    v_store = ChromaVectorStore()
+    v_store.delete_vector(id)
+    return {"status": "success"}
+
+@app.get("/api/charts_list")
+def list_charts(x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
+    """Returns a list of cached candlestick charts from the last 24 hours."""
+    charts = []
+    try:
+        charts_dir = os.path.join(os.path.dirname(__file__), "..", "temp_charts")
+        if os.path.exists(charts_dir):
+            import time
+            current_time = time.time()
+            for filename in os.listdir(charts_dir):
+                if filename.endswith(".png"):
+                    filepath = os.path.join(charts_dir, filename)
+                    # Check if file is less than 24 hours old
+                    if (current_time - os.path.getmtime(filepath)) < 86400:
+                        charts.append({
+                            "filename": filename,
+                            "url": f"http://localhost:7860/api/charts/{filename}",
+                            "timestamp": os.path.getmtime(filepath)
+                        })
+            # Sort newest first
+            charts.sort(key=lambda x: x["timestamp"], reverse=True)
+    except Exception as e:
+        pass
+    return charts
 
 @app.post("/api/upload")
+@limiter.limit("5/minute")
 async def upload_document(
+    request: Request,
     file: UploadFile = File(...),
     x_llm_provider: Optional[str] = Header("gemini"),
-    x_llm_api_key: Optional[str] = Header(None),
-    x_api_key: Optional[str] = Header(None, alias="X-API-Key")
+    x_llm_api_key: Optional[str] = Header(None)
 ):
-    """Handles PDF or TXT ingestion. Extracts text, chunks, embeds, and indexes to Vector DB."""
+    """Parses a PDF, applies semantic chunking, and stores it in the vector DB."""
+    if not file.filename.endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+    
     try:
-        content = ""
-        filename = file.filename
-        
-        # Read files based on type
-        if filename.endswith(".pdf"):
-            pdf_reader = PyPDF2.PdfReader(file.file)
-            first_page_text = pdf_reader.pages[0].extract_text() or ""
-            content += first_page_text
-            
-            # SEC Authenticity Check
-            first_page_upper = first_page_text.upper()
-            if not any(kw in first_page_upper for kw in [
-                "UNITED STATES SECURITIES AND EXCHANGE COMMISSION",
-                "FORM 10-K",
-                "FORM 10-Q",
-                "FORM 8-K"
-            ]):
-                raise HTTPException(status_code=400, detail="Document rejected: Authenticity check failed. Not a valid SEC filing.")
-
-            for page in pdf_reader.pages[1:]:
-                content += page.extract_text() or ""
+        content = await file.read()
+        doc = fitz.open(stream=content, filetype="pdf")
+        text = ""
+        table_chunks = []
+        for page in doc:
+            page_text = ""
+            try:
+                page_text += page.get_text("text", sort=True) + "\n\n"
+            except TypeError:
+                page_text += page.get_text("text") + "\n\n"
                 
-        elif filename.endswith(".txt"):
-            content_bytes = await file.read()
-            content = content_bytes.decode("utf-8")
-        else:
-            raise HTTPException(status_code=400, detail="Only PDF and TXT files are accepted")
+            # Attempt native table extraction
+            try:
+                tables_lines = page.find_tables(strategy="lines")
+                tables_text = page.find_tables(strategy="text")
+                
+                all_extracted = []
+                if tables_lines:
+                    for t in tables_lines: all_extracted.append(t.extract())
+                if tables_text:
+                    for t in tables_text: all_extracted.append(t.extract())
+                
+                if all_extracted:
+                    for idx, extracted in enumerate(all_extracted):
+                        if extracted and len(extracted) > 0:
+                            # Prepend the first 300 characters of the page as a semantic title/context
+                            context_header = page_text[:300].replace('\n', ' ').strip()
+                            table_chunk = f"TABLE CONTEXT (Page {page.number+1}): {context_header}...\n\n"
+                            table_chunk += f"--- STRUCTURED TABLE EXCAVATION (Page {page.number+1}, Extraction {idx+1}) ---\n"
+                            for row in extracted:
+                                clean_row = [str(cell).replace('\n', ' ').strip() if cell else "" for cell in row]
+                                table_chunk += "| " + " | ".join(clean_row) + " |\n"
+                            table_chunk += "--------------------------------------------------\n"
+                            # Add to standalone table buffer
+                            table_chunks.append(table_chunk)
+            except Exception as e:
+                print("Table extraction error:", str(e))
             
-        if not content.strip():
-            raise HTTPException(status_code=400, detail="File is empty or could not be read")
-            
-        import re
+            text += page_text
+        
+        # Advanced Chunking (preserving newlines and paragraph structure)
+        chunk_size = 1200
+        overlap = 250
         chunks = []
-        metadata = []
+        start = 0
+        text_len = len(text)
         
-        # Simple heuristic to split by SEC Items
-        items = [
-            ("Business Overview", r"(?i)(?:ITEM 1\.|ITEM 1 - BUSINESS)"),
-            ("Risk Factors", r"(?i)(?:ITEM 1A\.|ITEM 1A - RISK FACTORS)"),
-            ("MD&A", r"(?i)(?:ITEM 7\.|ITEM 7 - MANAGEMENT\'S)"),
-            ("Financial Statements", r"(?i)(?:ITEM 8\.|ITEM 8 - FINANCIAL)"),
-            ("Footnotes", r"(?i)(?:NOTES TO CONSOLIDATED FINANCIAL STATEMENTS)")
-        ]
-        
-        last_idx = 0
-        current_section = "General"
-        
-        # Find all item matches to chunk
-        matches = []
-        for sec_name, pattern in items:
-            for match in re.finditer(pattern, content):
-                matches.append((match.start(), sec_name))
+        while start < text_len:
+            end = start + chunk_size
+            if end >= text_len:
+                chunks.append(text[start:text_len].strip())
+                break
                 
-        matches.sort(key=lambda x: x[0])
-        
-        if not matches:
-            # Fallback to sliding window if no headers found
-            chunk_size = 1000
-            start = 0
-            while start < len(content):
-                chunks.append(content[start:start+chunk_size])
-                metadata.append({"ticker": "CUSTOM", "year": "2024", "filing": "SEC Document", "section": "General", "source_name": filename})
-                start += chunk_size - 150
-        else:
-            for i, (idx, sec_name) in enumerate(matches):
-                next_idx = matches[i+1][0] if i + 1 < len(matches) else len(content)
-                section_text = content[idx:next_idx].strip()
-                if len(section_text) > 100:
-                    # Break massive sections into smaller 2000 char chunks to avoid token limits
-                    sub_chunks = [section_text[j:j+2000] for j in range(0, len(section_text), 1800)]
-                    for sub in sub_chunks:
-                        chunks.append(sub)
-                        metadata.append({"ticker": "CUSTOM", "year": "2024", "filing": "SEC Document", "section": sec_name, "source_name": filename})
-        
-        v_store = ChromaVectorStore()
-        embeddings = LLMHelper.generate_embeddings(
-            chunks[:30], # Limit to 30 chunks to save API quotas during testing
-            provider=x_llm_provider, 
-            api_key=x_llm_api_key
-        )
-        
-        v_store.add_documents(chunks[:30], embeddings, metadata[:30])
-        
-        # Save original file
-        file_path = os.path.join(DOCUMENTS_DIR, filename)
-        with open(file_path, "wb") as f:
-            file.file.seek(0)
-            f.write(file.file.read())
+            # Try to find a clean break (double newline, single newline, or period)
+            nearest_break = text.rfind("\n\n", start, end)
+            if nearest_break == -1 or nearest_break < start + (chunk_size // 2):
+                nearest_break = text.rfind("\n", start, end)
+            if nearest_break == -1 or nearest_break < start + (chunk_size // 2):
+                nearest_break = text.rfind(". ", start, end)
+                
+            if nearest_break != -1 and nearest_break > start + (chunk_size // 2):
+                end = nearest_break + 1  # Include the break char
+                if text[end-1:end+1] == "\n\n": end += 1 # Include second newline if double
+                
+            chunks.append(text[start:end].strip())
+            start = end - overlap
             
-        return {
-            "success": True,
-            "filename": filename,
-            "chunks": len(chunks),
-            "size": f"{len(content)/1024:.1f} KB"
-        }
+        # Append all perfectly intact tables as their own dedicated chunks!
+        chunks.extend(table_chunks)
+            
+        if not chunks:
+            raise HTTPException(status_code=400, detail="No readable text found in PDF.")
+
+        # Embed and store
+        v_store = ChromaVectorStore()
+        
+        # Clear previous user uploads so we only analyze the most recently uploaded document
+        try:
+            v_store.collection.delete(where={"source_type": "user_upload"})
+        except Exception:
+            pass
+
+        embeddings = LLMHelper.generate_embeddings(chunks, provider=x_llm_provider, api_key=x_llm_api_key)
+        
+        metadata_list = [{
+            "source_type": "user_upload",
+            "tier": "User Docs",
+            "ticker": "N/A",
+            "source_name": file.filename,
+            "timestamp": datetime.datetime.utcnow().isoformat()
+        } for _ in chunks]
+        
+        v_store.add_documents(chunks, embeddings, metadata_list)
+        
+        return {"status": "success", "message": f"Document processed and embedded into {len(chunks)} chunks.", "chunks": len(chunks)}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Document upload processing failed: {str(e)}")
+        error_msg = str(e)
+        if "cannot open" in error_msg.lower() or "not a pdf" in error_msg.lower() or "filetype" in error_msg.lower():
+            raise HTTPException(status_code=400, detail="Invalid or corrupted PDF file. Please ensure the file is a valid PDF document.")
+        elif "dimension" in error_msg.lower() or "expected" in error_msg.lower():
+            raise HTTPException(status_code=400, detail="Vector DB Dimension Mismatch: You likely switched LLM providers (e.g., from OpenAI to Gemini) which have different vector sizes. Please go to the Memory Vault and click the Trash icon to reset the database before uploading.")
+        raise HTTPException(status_code=500, detail=f"Internal Server Error: {error_msg}")

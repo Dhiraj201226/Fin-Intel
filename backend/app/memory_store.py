@@ -59,6 +59,13 @@ class EpisodicMemory:
             episodes.append(ep)
         return episodes
 
+    def delete_episode(self, episode_id):
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM episodes WHERE id=?", (episode_id,))
+        conn.commit()
+        conn.close()
+
 
 class ChromaVectorStore:
     """Persistent Vector Database using ChromaDB."""
@@ -82,25 +89,32 @@ class ChromaVectorStore:
                 "ticker": str(meta.get("ticker", "GENERIC")),
                 "source_name": str(meta.get("source_name", "Unknown")),
                 "url": str(meta.get("url", "")),
-                "timestamp": str(datetime.utcnow().isoformat())
+                "timestamp": str(meta.get("timestamp", datetime.utcnow().isoformat()))
             }
+            if "query" in meta:
+                clean_meta["query"] = str(meta["query"])
             clean_metadata.append(clean_meta)
 
-        self.collection.add(
-            documents=chunks,
-            embeddings=embeddings,
-            metadatas=clean_metadata,
-            ids=ids
-        )
+        batch_size = 100
+        for i in range(0, len(chunks), batch_size):
+            self.collection.add(
+                documents=chunks[i:i+batch_size],
+                embeddings=embeddings[i:i+batch_size],
+                metadatas=clean_metadata[i:i+batch_size],
+                ids=ids[i:i+batch_size]
+            )
 
-    def similarity_search(self, query_vector, k=4, filter_ticker=None):
+    def similarity_search(self, query_vector, k=4, filter_ticker=None, custom_where=None):
         """Performs cosine similarity search against stored vectors."""
         if not query_vector:
             return []
 
-        where_clause = None
+        where_clause = custom_where if custom_where else {}
         if filter_ticker:
-            where_clause = {"ticker": filter_ticker.upper()}
+            where_clause["ticker"] = filter_ticker.upper()
+            
+        if not where_clause:
+            where_clause = None
             
         results = self.collection.query(
             query_embeddings=[query_vector],
@@ -137,3 +151,6 @@ class ChromaVectorStore:
                     "vector": "[Embedded by ChromaDB]"
                 })
         return display_docs
+
+    def delete_vector(self, vector_id):
+        self.collection.delete(ids=[vector_id])
