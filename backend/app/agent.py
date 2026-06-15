@@ -77,8 +77,8 @@ class ReActAgent:
             yield self._format_sse("thought", "Executing Document Analysis Branch...", 0, iteration)
             q_emb = LLMHelper.generate_embeddings([query], provider=self.provider, api_key=self.api_key)[0]
             
-            yield self._format_sse("action", "vector_store.similarity_search(source_type='user_upload', k=22)", 0, iteration)
-            doc_results = self.vector_store.similarity_search(q_emb, k=22, custom_where={"source_type": "user_upload"})
+            yield self._format_sse("action", "vector_store.similarity_search(source_type='user_upload', k=18)", 0, iteration)
+            doc_results = self.vector_store.similarity_search(q_emb, k=18, custom_where={"source_type": "user_upload"})
             
             if not doc_results:
                 yield self._format_sse("error", "No uploaded documents found to analyze. Please upload a PDF document first.", 0, iteration)
