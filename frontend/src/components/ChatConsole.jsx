@@ -57,23 +57,7 @@ export default function ChatConsole({
                 Input a company ticker or ask an investment analysis question. The agent will autonomously spin up a ReAct planning loop.
               </p>
             </div>
-            {/* Suggested prompts */}
-            <div className="pt-2 w-full max-w-md">
-              <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-2">
-                Suggested Research Queries
-              </div>
-              <div className="grid grid-cols-1 gap-1.5">
-                {suggestedQueries.map((q, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setQuery(q)}
-                    className="text-left bg-[#121824] hover:bg-[#1a2234] border border-[#242f49] hover:border-slate-600 rounded p-2 text-[11px] text-slate-400 hover:text-white transition-colors"
-                  >
-                    &gt; {q}
-                  </button>
-                ))}
-              </div>
-            </div>
+            {/* Suggested prompts removed per user request */}
           </div>
         ) : (
           <div className="space-y-4">

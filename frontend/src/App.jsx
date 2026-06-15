@@ -424,19 +424,23 @@ export default function App() {
               <PipelineStatus activeTier={activeTier} />
 
               {/* Inner splits: Left Chat Console, Right Report Viewer */}
-              <div className="flex-1 flex gap-4 min-h-0">
-                <ChatConsole 
-                  logs={logs}
-                  loading={loading}
-                  query={query}
-                  setQuery={setQuery}
-                  onSubmit={handleExecute}
-                  onReset={handleResetSession}
-                  suggestedQueries={suggestedQueries}
-                  onFileUpload={handleFileUpload}
-                />
+              <div className="flex-1 flex flex-col lg:flex-row gap-4 min-h-0 overflow-hidden">
+                <div className="w-full lg:w-1/2 flex-shrink-0 lg:flex-shrink flex flex-col min-h-0 h-[50vh] lg:h-auto">
+                  <ChatConsole 
+                    logs={logs}
+                    loading={loading}
+                    query={query}
+                    setQuery={setQuery}
+                    onSubmit={handleExecute}
+                    onReset={handleResetSession}
+                    suggestedQueries={suggestedQueries}
+                    onFileUpload={handleFileUpload}
+                  />
+                </div>
                 
-                <ReportViewer report={activeReport} />
+                <div className="w-full lg:w-1/2 flex flex-col min-h-0 h-[50vh] lg:h-auto">
+                  <ReportViewer report={activeReport} />
+                </div>
               </div>
             </>
           )}
