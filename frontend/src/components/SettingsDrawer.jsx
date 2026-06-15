@@ -38,14 +38,14 @@ export default function SettingsDrawer({ isOpen, onClose, settings, onSave }) {
                 Gemini
               </button>
               <button
-                onClick={() => handleChange('provider', 'openai')}
+                onClick={() => handleChange('provider', 'groq')}
                 className={`flex-1 py-2 px-3 rounded-lg border transition-colors text-xs font-medium ${
-                  settings.provider === 'openai' 
+                  settings.provider === 'groq' 
                     ? 'border-indigo-500 bg-indigo-500/10 text-indigo-400' 
                     : 'border-slate-700 text-slate-400 hover:border-slate-600'
                 }`}
               >
-                OpenAI
+                Groq
               </button>
               <button
                 onClick={() => handleChange('provider', 'ollama')}
@@ -65,15 +65,15 @@ export default function SettingsDrawer({ isOpen, onClose, settings, onSave }) {
           <div className="space-y-2">
             <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1">
               <Key className="h-3.5 w-3.5" />
-              <span>{settings.provider === 'gemini' ? 'Gemini API Key' : 'OpenAI API Key'}</span>
+              <span>{settings.provider === 'gemini' ? 'Gemini API Key' : (settings.provider === 'groq' ? 'Groq API Key' : 'OpenAI API Key')}</span>
             </label>
             <input
               type="password"
-              placeholder={settings.provider === 'gemini' ? 'AIzaSy...' : 'sk-proj-...'}
-              value={settings.provider === 'gemini' ? settings.geminiKey : settings.openaiKey}
+              placeholder={settings.provider === 'gemini' ? 'AIzaSy...' : (settings.provider === 'groq' ? 'gsk_...' : 'sk-proj-...')}
+              value={settings.provider === 'gemini' ? settings.geminiKey : (settings.provider === 'groq' ? settings.groqKey : settings.openaiKey)}
               onChange={(e) =>
                 handleChange(
-                  settings.provider === 'gemini' ? 'geminiKey' : 'openaiKey',
+                  settings.provider === 'gemini' ? 'geminiKey' : (settings.provider === 'groq' ? 'groqKey' : 'openaiKey'),
                   e.target.value
                 )
               }

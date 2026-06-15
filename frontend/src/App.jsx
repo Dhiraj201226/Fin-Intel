@@ -482,13 +482,13 @@ export default function App() {
              <div className="flex flex-col gap-2 mt-2">
                <button 
                  onClick={() => { 
-                   setSettings(prev => ({...prev, provider: 'openai'})); 
+                   setSettings(prev => ({...prev, provider: 'groq'})); 
                    setRateLimitModalOpen(false); 
-                   setTimeout(handleExecute, 300); // Retry after state updates
+                   setTimeout(handleExecute, 300);
                  }} 
                  className="w-full bg-[#10b981] hover:bg-[#059669] text-white py-2 rounded text-xs font-bold transition-colors"
                >
-                 Switch to OpenAI & Retry
+                 Switch to Groq & Retry
                </button>
                <button 
                  onClick={() => { 
