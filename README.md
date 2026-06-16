@@ -13,6 +13,22 @@ Fin-Intel is a full-stack, intelligent financial agent designed to analyze stock
 * 📄 **Financial Document Parsing:** Ingest and index PDF reports (annual reports, earnings statements) using high-speed extraction libraries (`PyMuPDF` and `PyPDF2`).
 * 🎨 **Premium Glassmorphic UI:** A beautiful, responsive frontend built with React, Vite, and Tailwind CSS. Features dynamic dashboards, report previews, and real-time Server-Sent Events (SSE) conversation streaming.
 
+## 🧠 Dual-Intent ReAct Architecture
+
+Fin-Intel is built on a custom Reasoning and Acting (ReAct) loop that autonomously routes user queries into one of two specialized pipelines:
+
+### 1. Live Market Recommendation Branch
+When a user asks about a specific stock (e.g., *"Should I buy AAPL?"*), the agent routes the request to the live market pipeline.
+*   **Data Extraction:** Automatically fetches live balance sheets, cash flows, and income statements via the Yahoo Finance API.
+*   **Deterministic Math Engine:** Instead of letting the LLM hallucinate an investment thesis, the agent passes the raw data through a strict mathematical engine to calculate precise Growth, Profitability, and Health scores.
+*   **Final Output:** Generates a mathematically backed buy/hold/sell recommendation.
+
+### 2. Document Analysis Branch (RAG)
+When a user asks a contextual question about a specific document (e.g., *"What is the export revenue in the uploaded report?"*), the agent routes the request to the document analysis pipeline.
+*   **Vectorization:** Uploaded PDFs (like 200-page Annual Reports) are parsed via `PyMuPDF`, broken into semantic chunks (with special handling for complex financial tables), and embedded into a local **ChromaDB** vector store.
+*   **Targeted Retrieval:** The agent performs a similarity search to hunt down the exact paragraphs and tables required to answer the query.
+*   **Final Output:** The LLM synthesizes the retrieved chunks into a conversational, highly accurate summary, completely eliminating manual document hunting.
+
 ---
 
 ## 📊 Financial Scoring & Decision Model
