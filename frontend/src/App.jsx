@@ -59,6 +59,7 @@ export default function App() {
   }, [settings.geminiKey, settings.openaiKey, settings.groqKey]);
 
   // General App states
+  const [sessionId, setSessionId] = useState(`sess_${Math.random().toString(36).substring(2, 9)}`);
   const [selectedStock, setSelectedStock] = useState('AAPL');
   const [query, setQuery] = useState('');
   const [logs, setLogs] = useState([]);
@@ -158,9 +159,10 @@ export default function App() {
           "x-llm-api-key": providerKey || "",
           "x-llm-max-steps": settings.maxSteps.toString(),
           "x-llm-temperature": settings.temperature.toString(),
+          "x-session-id": sessionId,
           "X-API-Key": "test_key"
         },
-        body: JSON.stringify({ query: query, ticker: ticker })
+        body: JSON.stringify({ query: query, ticker: ticker, session_id: sessionId })
       });
 
       if (!response.ok) {
@@ -196,15 +198,24 @@ export default function App() {
             
             // Add to Episodic Memory List
             const wasEarlyStopped = data.logs.some(l => l.text && l.text.toLowerCase().includes("early"));
+            
+            // Build chat_log so UI can load it later
+            const chatLog = [
+              { role: "User", text: query },
+              { role: "Agent", text: data.report }
+            ];
+            
             const newEpisode = {
               id: `EP-${Math.floor(1000 + Math.random() * 9000)}`,
+              session_id: sessionId,
               timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
               query: query,
               status: wasEarlyStopped ? "EARLY_STOPPED" : "SUCCESS",
-              toolsUsed: ["vector_store", "yfinance_api", "financial_engine"],
+              tools_used: ["vector_store", "yfinance_api", "financial_engine"],
               failures: "None",
               recovery: "N/A",
-              strategy: `2-Tier hierarchy: ${wasEarlyStopped ? "early stopped at Stage 1" : "completed all stages"} for query.`
+              strategy: `2-Tier hierarchy: ${wasEarlyStopped ? "early stopped at Stage 1" : "completed all stages"} for query.`,
+              chat_log: chatLog
             };
             setEpisodicMemory(prev => [newEpisode, ...prev]);
           }
@@ -230,6 +241,7 @@ export default function App() {
   };
 
   const handleResetSession = () => {
+    setSessionId(`sess_${Math.random().toString(36).substring(2, 9)}`);
     setLogs([]);
     setActiveReport(null);
     setActiveTier(0);
@@ -252,6 +264,7 @@ export default function App() {
         headers: {
           "x-llm-provider": settings.provider,
           "x-llm-api-key": providerKey || "",
+          "x-session-id": sessionId,
           "X-API-Key": "test_key"
         },
         body: formData
@@ -276,6 +289,44 @@ export default function App() {
   };
 
   const activeStockData = mockStocks[selectedStock];
+  
+  // Compute unique sessions for the history sidebar
+  const uniqueSessions = [];
+  const seenSessions = new Set();
+  episodicMemory.forEach(ep => {
+    if (ep.session_id && !seenSessions.has(ep.session_id)) {
+      seenSessions.add(ep.session_id);
+      uniqueSessions.push(ep);
+    }
+  });
+
+  const loadSession = (targetSessionId) => {
+    setSessionId(targetSessionId);
+    setActiveTab('terminal');
+    
+    // Find all episodes for this session to reconstruct logs
+    const sessionEps = episodicMemory.filter(ep => ep.session_id === targetSessionId).reverse();
+    
+    // Construct basic logs from chat history
+    let reconstructedLogs = [];
+    let lastReport = null;
+    
+    sessionEps.forEach(ep => {
+      if (ep.chat_log && Array.isArray(ep.chat_log)) {
+        ep.chat_log.forEach(turn => {
+          if (turn.role === 'User') {
+            reconstructedLogs.push({ type: 'user', text: turn.text });
+          } else if (turn.role === 'Agent') {
+            lastReport = turn.text;
+          }
+        });
+      }
+    });
+    
+    setLogs(reconstructedLogs);
+    setActiveReport(lastReport);
+    setIsSidebarOpen(false); // Close mobile sidebar
+  };
 
   return (
     <div className="min-h-screen w-full bg-[#0b0f17] flex flex-col font-sans overflow-x-hidden">
@@ -428,6 +479,31 @@ export default function App() {
                     {sym}
                   </button>
                 ))}
+              </div>
+            </div>
+
+            {/* Chat History */}
+            <div className="pt-2 border-t border-[#242f49] max-h-48 overflow-y-auto custom-scrollbar">
+              <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block mb-2">
+                Chat History
+              </span>
+              <div className="flex flex-col gap-1">
+                {uniqueSessions.map((session, idx) => (
+                  <button
+                    key={session.id}
+                    onClick={() => loadSession(session.session_id)}
+                    className={`w-full text-left py-1.5 px-2 rounded text-[10px] font-medium truncate transition-all ${
+                      sessionId === session.session_id
+                        ? 'bg-[#10b981]/15 text-[#10b981] border-l-2 border-[#10b981]'
+                        : 'text-slate-400 hover:bg-[#1a2234] hover:text-white border-l-2 border-transparent'
+                    }`}
+                  >
+                    {session.query}
+                  </button>
+                ))}
+                {uniqueSessions.length === 0 && (
+                  <span className="text-[10px] text-slate-600 italic">No previous chats.</span>
+                )}
               </div>
             </div>
           </div>

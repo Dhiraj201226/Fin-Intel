@@ -18,25 +18,35 @@ class EpisodicMemory:
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS episodes (
                 id TEXT PRIMARY KEY,
+                session_id TEXT,
                 timestamp TEXT,
                 query TEXT,
                 status TEXT,
                 tools_used TEXT,
                 failures TEXT,
                 recovery TEXT,
-                strategy TEXT
+                strategy TEXT,
+                chat_log TEXT
             )
         """)
+        
+        # Backward compatibility for existing DB
+        try:
+            cursor.execute("ALTER TABLE episodes ADD COLUMN session_id TEXT")
+            cursor.execute("ALTER TABLE episodes ADD COLUMN chat_log TEXT")
+        except:
+            pass
+        
         conn.commit()
         conn.close()
 
-    def log_episode(self, episode_id, query, status, tools_used, failures, recovery, strategy):
+    def log_episode(self, episode_id, session_id, query, status, tools_used, failures, recovery, strategy, chat_log="[]"):
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         cursor.execute(
-            "INSERT OR REPLACE INTO episodes VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (episode_id, timestamp, query, status, json.dumps(tools_used), failures, recovery, strategy)
+            "INSERT OR REPLACE INTO episodes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (episode_id, session_id, timestamp, query, status, json.dumps(tools_used), failures, recovery, strategy, chat_log)
         )
         conn.commit()
         conn.close()
@@ -56,8 +66,28 @@ class EpisodicMemory:
                 ep['tools_used'] = json.loads(ep['tools_used'])
             except:
                 ep['tools_used'] = []
+            try:
+                ep['chat_log'] = json.loads(ep.get('chat_log', '[]'))
+            except:
+                ep['chat_log'] = []
             episodes.append(ep)
         return episodes
+
+    def get_session_history(self, session_id):
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM episodes WHERE session_id=? ORDER BY timestamp ASC", (session_id,))
+        rows = cursor.fetchall()
+        conn.close()
+        
+        history = []
+        for row in rows:
+            try:
+                history.extend(json.loads(row['chat_log']))
+            except:
+                pass
+        return history
 
     def delete_episode(self, episode_id):
         conn = sqlite3.connect(self.db_path)
@@ -85,6 +115,7 @@ class ChromaVectorStore:
         for meta in metadata_list:
             clean_meta = {
                 "source_type": str(meta.get("source_type", "unknown")),
+                "session_id": str(meta.get("session_id", "GLOBAL")),
                 "tier": str(meta.get("tier", "Unknown")),
                 "ticker": str(meta.get("ticker", "GENERIC")),
                 "source_name": str(meta.get("source_name", "Unknown")),

@@ -12,11 +12,12 @@ MAX_ITER = 12
 class ReActAgent:
     """Orchestrates the ReAct reasoning loops (Thought -> Action -> Observation) and memory writes."""
     
-    def __init__(self, provider="gemini", api_key=None, max_steps=MAX_ITER, temperature=0.3):
+    def __init__(self, provider="gemini", api_key=None, max_steps=MAX_ITER, temperature=0.3, session_id="GLOBAL"):
         self.provider = provider
         self.api_key = api_key
         self.max_steps = min(max_steps, MAX_ITER)
         self.temperature = temperature
+        self.session_id = session_id
         self.episodic_memory = EpisodicMemory()
         self.vector_store = ChromaVectorStore()
 
@@ -55,9 +56,15 @@ class ReActAgent:
         accumulated_context = ""
         iteration = 0
 
+        # --- FETCH CHAT HISTORY ---
+        chat_history_list = self.episodic_memory.get_session_history(self.session_id)
+        chat_history_str = ""
+        if chat_history_list:
+            chat_history_str = "\n".join([f"{item.get('role', 'User')}: {item.get('text', '')}" for item in chat_history_list[-6:]]) # Last 6 turns
+            
         # --- INTENT CLASSIFIER ---
-        yield self._format_sse("thought", "Classifying query intent...", 0, iteration)
-        intent_prompt = f"Does the following user query ask for a stock recommendation/financial analysis of a company, or is it asking to analyze uploaded documents/custom data? (Hint: if the query asks to 'summarize', mentions a 'section', or asks questions about text, it is likely 'ANALYSIS'). Reply with exactly 'RECOMMENDATION' or 'ANALYSIS'.\n\nQuery: {query}"
+        yield self._format_sse("thought", "Classifying query intent with conversation history...", 0, iteration)
+        intent_prompt = f"Does the following user query ask for a stock recommendation/financial analysis of a company, or is it asking to analyze uploaded documents/custom data? (Hint: if the query asks to 'summarize', mentions a 'section', or asks questions about text, it is likely 'ANALYSIS'). Reply with exactly 'RECOMMENDATION' or 'ANALYSIS'.\n\nPast Chat Context:\n{chat_history_str}\n\nQuery: {query}"
         intent_response = LLMHelper.generate_text(intent_prompt, provider=self.provider, api_key=self.api_key)
         
         intent = "ANALYSIS" if "ANALYSIS" in intent_response.upper() and "RECOMMENDATION" not in intent_response.upper() else "RECOMMENDATION"
@@ -77,8 +84,8 @@ class ReActAgent:
             yield self._format_sse("thought", "Executing Document Analysis Branch...", 0, iteration)
             q_emb = LLMHelper.generate_embeddings([query], provider=self.provider, api_key=self.api_key)[0]
             
-            yield self._format_sse("action", "vector_store.similarity_search(source_type='user_upload', k=18)", 0, iteration)
-            doc_results = self.vector_store.similarity_search(q_emb, k=18, custom_where={"source_type": "user_upload"})
+            yield self._format_sse("action", f"vector_store.similarity_search(source_type='user_upload', session_id='{self.session_id}', k=18)", 0, iteration)
+            doc_results = self.vector_store.similarity_search(q_emb, k=18, custom_where={"$and": [{"source_type": "user_upload"}, {"session_id": self.session_id}]})
             
             if not doc_results:
                 yield self._format_sse("error", "No uploaded documents found to analyze. Please upload a PDF document first.", 0, iteration)
@@ -105,6 +112,10 @@ RULES:
 ---
 DOCUMENT TEXT:
 {context}
+
+---
+PREVIOUS CHAT HISTORY:
+{chat_history_str}
 
 ---
 USER QUERY: {query}
@@ -341,6 +352,9 @@ RAW METRICS & COMPUTED RATIOS:
 
 User Query: {query}
 
+Past Chat Context:
+{chat_history_str}
+
 Retrieved Context:
 {accumulated_context}
 
@@ -392,15 +406,24 @@ Report Format:
             yield self._format_sse("error", f"Failed to cache final report: {str(e)}", 0, iteration)
 
         status_str = "EARLY_STOPPED" if early_stopped else "SUCCESS"
+        
+        # Build chat log representation
+        chat_log = json.dumps([
+            {"role": "User", "text": query},
+            {"role": "Agent", "text": report}
+        ])
+        
         if not early_stopped:
             self.episodic_memory.log_episode(
                 episode_id=f"EP-{random.randint(1000, 9999)}",
+                session_id=self.session_id,
                 query=query,
                 status=status_str,
                 tools_used=tools_used,
                 failures=failures,
                 recovery=recovery,
-                strategy=f"2-Tier strategy executed. Early stopped: {early_stopped} at Stage {stopping_stage}."
+                strategy=f"2-Tier strategy executed. Early stopped: {early_stopped} at Stage {stopping_stage}.",
+                chat_log=chat_log
             )
 
         yield self._format_sse("done", "Episode complete", 0, iteration)

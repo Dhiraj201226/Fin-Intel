@@ -43,6 +43,7 @@ app.mount("/api/charts", StaticFiles(directory=charts_dir), name="charts")
 class ResearchRequest(BaseModel):
     query: str
     ticker: Optional[str] = None
+    session_id: Optional[str] = None
 
 class SecFetchRequest(BaseModel):
     ticker: str
@@ -59,6 +60,7 @@ async def execute_research(
     x_llm_provider: Optional[str] = Header("gemini"),
     x_llm_api_key: Optional[str] = Header(None),
     x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    x_session_id: Optional[str] = Header(None),
     x_llm_max_steps: Optional[str] = Header("12"),
     x_llm_temperature: Optional[str] = Header("0.3")
 ):
@@ -77,7 +79,8 @@ async def execute_research(
         provider=x_llm_provider,
         api_key=x_llm_api_key,
         max_steps=max_steps,
-        temperature=temp
+        temperature=temp,
+        session_id=x_session_id or req.session_id or "GLOBAL"
     )
     
     logs = []
@@ -167,7 +170,8 @@ async def upload_document(
     request: Request,
     file: UploadFile = File(...),
     x_llm_provider: Optional[str] = Header("gemini"),
-    x_llm_api_key: Optional[str] = Header(None)
+    x_llm_api_key: Optional[str] = Header(None),
+    x_session_id: Optional[str] = Header("GLOBAL")
 ):
     """Parses a PDF, applies semantic chunking, and stores it in the vector DB."""
     if not file.filename.endswith(".pdf"):
@@ -250,17 +254,18 @@ async def upload_document(
         # Embed and store
         v_store = ChromaVectorStore()
         
-        # Clear previous user uploads so we only analyze the most recently uploaded document
-        try:
-            v_store.collection.delete(where={"source_type": "user_upload"})
-        except Exception:
-            pass
+        # We no longer clear previous uploads. Instead, we isolate them via session_id!
+        # try:
+        #     v_store.collection.delete(where={"source_type": "user_upload"})
+        # except Exception:
+        #     pass
 
         embeddings = LLMHelper.generate_embeddings(chunks, provider=x_llm_provider, api_key=x_llm_api_key)
         
         metadata_list = [{
             "source_type": "user_upload",
             "tier": "User Docs",
+            "session_id": x_session_id,
             "ticker": "N/A",
             "source_name": file.filename,
             "timestamp": datetime.datetime.utcnow().isoformat()
