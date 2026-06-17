@@ -329,7 +329,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen w-full bg-[#0b0f17] flex flex-col font-sans overflow-x-hidden">
+    <div className="h-screen w-full bg-[#0b0f17] flex flex-col font-sans overflow-hidden">
       
       {/* Top Navigation / Terminal Header Bar */}
       <header className="bg-[#121824] border-b border-[#242f49] px-4 py-3 flex items-center justify-between shrink-0 sticky top-0 z-30">
