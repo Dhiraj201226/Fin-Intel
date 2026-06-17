@@ -43,20 +43,34 @@ def generate_mock_financial_data(ticker: str) -> dict:
         }
     }
 
+def get_yahoo_session():
+    """Custom Crumb-Catcher to steal Yahoo cookies and bypass 429 blocks."""
+    import requests
+    import requests_cache
+    
+    session = requests_cache.CachedSession('yfinance_cache', expire_after=86400)
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+    })
+    
+    try:
+        # 1. Steal the A3 Cookie
+        session.get("https://fc.yahoo.com", timeout=10, allow_redirects=True)
+        # 2. Extract the Crumb
+        crumb_response = session.get("https://query1.finance.yahoo.com/v1/test/getcrumb", timeout=10)
+        if crumb_response.status_code == 200:
+            logger.info("Successfully stole Yahoo Crumb!")
+    except Exception as e:
+        logger.warning(f"Crumb extraction failed, continuing anyway: {e}")
+        
+    return session
+
 def fetch_yfinance_facts(ticker: str) -> dict:
     """Fetches core financial metrics using yfinance."""
     try:
-        import requests
-        import requests_cache
-        
-        # Cache successful requests for 24 hours to aggressively bypass rate limits on repeated queries
-        session = requests_cache.CachedSession('yfinance_cache', expire_after=86400)
-        session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.5",
-            "Connection": "keep-alive"
-        })
+        session = get_yahoo_session()
         
         stock = yf.Ticker(ticker, session=session)
         inc = stock.income_stmt
@@ -154,14 +168,7 @@ def fetch_yfinance_facts(ticker: str) -> dict:
 def generate_candlestick_chart(ticker: str) -> str:
     """Fetches 2 months of daily data and saves a candlestick chart."""
     try:
-        import requests
-        import requests_cache
-        
-        session = requests_cache.CachedSession('yfinance_cache', expire_after=86400)
-        session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        })
-        
+        session = get_yahoo_session()
         stock = yf.Ticker(ticker, session=session)
         df = stock.history(period="2mo", interval="1d")
         
