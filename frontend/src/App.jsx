@@ -10,7 +10,9 @@ import {
   Lock, 
   Unlock,
   ShieldCheck,
-  TrendingUp
+  TrendingUp,
+  Menu,
+  X
 } from 'lucide-react';
 
 import ChatConsole from './components/ChatConsole.jsx';
@@ -33,6 +35,9 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:7860";
 export default function App() {
   // Navigation tab states: 'terminal' | 'memory' | 'charts'
   const [activeTab, setActiveTab] = useState('terminal');
+  
+  // Mobile sidebar state
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   
   // Settings Drawer state
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -273,12 +278,18 @@ export default function App() {
   const activeStockData = mockStocks[selectedStock];
 
   return (
-    <div className="h-screen w-screen bg-[#0b0f17] flex flex-col font-sans">
+    <div className="min-h-screen w-full bg-[#0b0f17] flex flex-col font-sans overflow-x-hidden">
       
       {/* Top Navigation / Terminal Header Bar */}
-      <header className="bg-[#121824] border-b border-[#242f49] px-4 py-3 flex items-center justify-between shrink-0">
+      <header className="bg-[#121824] border-b border-[#242f49] px-4 py-3 flex items-center justify-between shrink-0 sticky top-0 z-30">
         <div className="flex items-center gap-3">
-          <div className="flex items-center justify-center bg-[#10b981]/15 border border-[#10b981]/30 p-1.5 rounded">
+          <button 
+            className="lg:hidden p-1 text-slate-300 hover:text-white" 
+            onClick={() => setIsSidebarOpen(true)}
+          >
+            <Menu className="h-6 w-6" />
+          </button>
+          <div className="flex items-center justify-center bg-[#10b981]/15 border border-[#10b981]/30 p-1.5 rounded hidden sm:flex">
             <Activity className="h-5 w-5 text-[#10b981] animate-pulse" />
           </div>
           <div>
@@ -328,11 +339,30 @@ export default function App() {
       </header>
 
       {/* Main Workspace Layout */}
-      <div className="flex-1 flex min-h-0 overflow-hidden">
+      <div className="flex-1 flex flex-col lg:flex-row min-h-0">
         
+        {/* Mobile Sidebar Overlay */}
+        {isSidebarOpen && (
+          <div 
+            className="fixed inset-0 bg-black/60 z-40 lg:hidden" 
+            onClick={() => setIsSidebarOpen(false)} 
+          />
+        )}
+
         {/* Navigation Sidebar Panel */}
-        <aside className="w-56 bg-[#121824]/60 border-r border-[#242f49] p-4 flex flex-col justify-between shrink-0">
+        <aside className={`fixed lg:static top-0 left-0 h-full lg:h-auto z-50 w-64 lg:w-56 bg-[#121824] border-r border-[#242f49] p-4 flex flex-col justify-between shrink-0 transition-transform duration-300 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
           <div className="space-y-5">
+            {/* Mobile Sidebar Header */}
+            <div className="flex items-center justify-between lg:hidden mb-4 pb-4 border-b border-[#242f49]">
+              <div className="flex items-center gap-2">
+                <Activity className="h-5 w-5 text-[#10b981]" />
+                <span className="text-white font-bold text-sm">FININTEL</span>
+              </div>
+              <button onClick={() => setIsSidebarOpen(false)} className="text-slate-400 hover:text-white">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
             {/* Nav Title */}
             <div>
               <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block mb-2">
@@ -424,8 +454,8 @@ export default function App() {
               <PipelineStatus activeTier={activeTier} />
 
               {/* Inner splits: Left Chat Console, Right Report Viewer */}
-              <div className="flex-1 flex flex-col lg:flex-row gap-4 min-h-0 overflow-hidden">
-                <div className="w-full lg:w-1/2 flex-shrink-0 lg:flex-shrink flex flex-col min-h-0 h-[50vh] lg:h-auto">
+              <div className="flex-1 flex flex-col lg:flex-row gap-4 min-h-0">
+                <div className="w-full lg:w-1/2 flex flex-col min-h-[500px]">
                   <ChatConsole 
                     logs={logs}
                     loading={loading}
@@ -438,7 +468,7 @@ export default function App() {
                   />
                 </div>
                 
-                <div className="w-full lg:w-1/2 flex flex-col min-h-0 h-[50vh] lg:h-auto">
+                <div className="w-full lg:w-1/2 flex flex-col min-h-[500px]">
                   <ReportViewer report={activeReport} />
                 </div>
               </div>
