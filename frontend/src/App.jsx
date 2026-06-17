@@ -114,7 +114,7 @@ export default function App() {
     // Find all 1-10 letter all-caps words, optionally ending in .NS or .BO
     const matches = q.match(/\b([A-Z]{1,10}(?:\.NS|\.BO)?)\b/g);
     if (matches) {
-      const exclusions = ["WHAT", "HOW", "WHY", "IS", "THE", "A", "AN", "AND", "OR", "IF", "IT", "ABOUT", "BUY", "SELL", "STOCK", "STOCKS", "ON", "FOR", "IN", "TO", "OF", "TATA", "STEEL", "POWER", "MOTORS", "BANK", "INDIA", "CORP", "LTD"];
+      const exclusions = ["I", "ME", "MY", "WHAT", "HOW", "WHY", "IS", "THE", "A", "AN", "AND", "OR", "IF", "IT", "ABOUT", "BUY", "SELL", "STOCK", "STOCKS", "ON", "FOR", "IN", "TO", "OF", "TATA", "STEEL", "POWER", "MOTORS", "BANK", "INDIA", "CORP", "LTD"];
       for (const match of matches) {
         if (!exclusions.includes(match)) {
           return match;
@@ -521,7 +521,7 @@ export default function App() {
         </aside>
 
         {/* Center Panel - Main display based on navigation */}
-        <main className="flex-1 p-4 flex flex-col gap-4 min-w-0">
+        <main className="flex-1 p-4 flex flex-col gap-4 min-w-0 overflow-y-auto">
           
           {/* Tab 1: Terminal & RAG Dashboard */}
           {activeTab === 'terminal' && (
