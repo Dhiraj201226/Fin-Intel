@@ -19,4 +19,4 @@ matplotlib
 mplfinance
 pillow
 openai
-requests-cache
+yahooquery
