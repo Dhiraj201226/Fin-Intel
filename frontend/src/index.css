@@ -42,9 +42,9 @@
 body {
   background-color: var(--bg-primary);
   color: var(--text-primary);
-  overflow: hidden;
-  height: 100vh;
+  min-height: 100dvh;
   width: 100vw;
+  overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
 }
 

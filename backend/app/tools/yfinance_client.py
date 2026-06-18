@@ -13,15 +13,17 @@ def fetch_yfinance_facts(ticker: str) -> dict:
         stock = Ticker(ticker)
         
         # Yahooquery returns dataframes indexed by symbol, or a string if invalid
-        inc = stock.income_statement(frequency='q')
-        bal = stock.balance_sheet(frequency='q')
-        cf = stock.cash_flow(frequency='q')
+        inc = stock.income_statement()
+        bal = stock.balance_sheet()
+        cf = stock.cash_flow()
         summary = stock.summary_detail
         
         if isinstance(inc, pd.DataFrame) and 'periodType' in inc.columns:
-            inc = inc[inc['periodType'] == 'TTM']
+            inc = inc[inc['periodType'] == '12M']
         if isinstance(cf, pd.DataFrame) and 'periodType' in cf.columns:
-            cf = cf[cf['periodType'] == 'TTM']
+            cf = cf[cf['periodType'] == '12M']
+        if isinstance(bal, pd.DataFrame) and 'periodType' in bal.columns:
+            bal = bal[bal['periodType'] == '12M']
         
         if isinstance(inc, str) or isinstance(bal, str) or summary is None:
             return {"error": f"Data Extraction Failed: Could not fetch data for {ticker}. Check ticker symbol."}

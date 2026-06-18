@@ -114,9 +114,11 @@ export default function App() {
     // Find all 1-10 letter all-caps words, optionally ending in .NS or .BO
     const matches = q.match(/\b([A-Z]{1,10}(?:\.NS|\.BO)?)\b/g);
     if (matches) {
-      const exclusions = ["I", "ME", "MY", "WHAT", "HOW", "WHY", "IS", "THE", "A", "AN", "AND", "OR", "IF", "IT", "ABOUT", "BUY", "SELL", "STOCK", "STOCKS", "ON", "FOR", "IN", "TO", "OF", "TATA", "STEEL", "POWER", "MOTORS", "BANK", "INDIA", "CORP", "LTD"];
+      const validOneLetterTickers = ["F", "C", "V", "O", "T", "X"];
+      const exclusions = ["I", "ME", "MY", "WHAT", "HOW", "WHY", "IS", "THE", "A", "AN", "AND", "OR", "IF", "IT", "ABOUT", "BUY", "SELL", "STOCK", "STOCKS", "ON", "FOR", "IN", "TO", "OF", "TATA", "STEEL", "POWER", "MOTORS", "BANK", "INDIA", "CORP", "LTD", "SHOULD", "NOW", "RIGHT"];
       for (const match of matches) {
         if (!exclusions.includes(match)) {
+          if (match.length === 1 && !validOneLetterTickers.includes(match)) continue;
           return match;
         }
       }
