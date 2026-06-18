@@ -77,7 +77,7 @@ def fetch_yfinance_facts(ticker: str) -> dict:
             "net_income": get_latest(inc, ["NetIncome", "NetIncomeCommonStockholders"]),
             "eps": get_latest(inc, ["BasicEPS", "DilutedEPS"]),
             "cogs": get_latest(inc, ["CostOfRevenue"]),
-            "interest_expense": get_latest(inc, ["InterestExpense"]),
+            "interest_expense": max(0, (get_latest(inc, ["InterestExpense"]) or 0) - (get_latest(inc, ["InterestIncome"]) or 0)) if get_latest(inc, ["InterestExpense"]) else None,
             "depreciation_and_amortization": get_latest(cf, ["DepreciationAndAmortization"]) or get_latest(inc, ["Depreciation", "Amortization", "ReconciledDepreciation"]),
 
             # Balance Sheet
