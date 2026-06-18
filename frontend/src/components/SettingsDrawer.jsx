@@ -60,30 +60,7 @@ export default function SettingsDrawer({ isOpen, onClose, settings, onSave }) {
             </div>
         </div>
 
-        {/* API Key Input */}
-        {settings.provider !== 'ollama' && (
-          <div className="space-y-2">
-            <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1">
-              <Key className="h-3.5 w-3.5" />
-              <span>{settings.provider === 'gemini' ? 'Gemini API Key' : (settings.provider === 'groq' ? 'Groq API Key' : 'OpenAI API Key')}</span>
-            </label>
-            <input
-              type="password"
-              placeholder={settings.provider === 'gemini' ? 'AIzaSy...' : (settings.provider === 'groq' ? 'gsk_...' : 'sk-proj-...')}
-              value={settings.provider === 'gemini' ? settings.geminiKey : (settings.provider === 'groq' ? settings.groqKey : settings.openaiKey)}
-              onChange={(e) =>
-                handleChange(
-                  settings.provider === 'gemini' ? 'geminiKey' : (settings.provider === 'groq' ? 'groqKey' : 'openaiKey'),
-                  e.target.value
-                )
-              }
-              className="w-full bg-[#0b0f17] border border-[#242f49] rounded p-2 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-[#10b981]"
-            />
-            <span className="text-[10px] text-slate-500 block">
-              Keys are stored locally in your browser and are never uploaded.
-            </span>
-          </div>
-        )}
+        {/* API Keys are now managed securely on the backend */}
 
         {/* Max Steps */}
         <div className="space-y-2">
