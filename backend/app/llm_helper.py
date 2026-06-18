@@ -125,6 +125,14 @@ Based on our simulated data extraction, the company is showing strong fundamenta
                     embeddings.extend([data.embedding for data in response.data])
                 print("Ollama embeddings complete!")
                 return embeddings
+            elif provider == "groq":
+                print("Groq does not provide an embedding model. Falling back to local hash embeddings...")
+                embeddings = []
+                for chunk in text_chunks:
+                    h = hash(chunk)
+                    np.random.seed(h & 0xffffffff)
+                    embeddings.append(np.random.rand(768).tolist()) # Match Gemini's 768 dimensions to prevent DB crashes
+                return embeddings
             else:
                 client = OpenAI(api_key=key)
                 embeddings = []
