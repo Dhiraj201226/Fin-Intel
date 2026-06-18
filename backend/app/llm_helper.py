@@ -106,7 +106,7 @@ Based on our simulated data extraction, the company is showing strong fundamenta
                     if idx % 50 == 0 and idx > 0:
                         print(f"Embedded {idx}/{total_chunks} chunks...")
                     result = genai.embed_content(
-                        model="models/embedding-001",
+                        model="models/text-embedding-004",
                         content=chunk,
                         task_type="retrieval_document"
                     )
