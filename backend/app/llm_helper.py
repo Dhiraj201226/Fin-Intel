@@ -4,7 +4,7 @@ import google.generativeai as genai
 from openai import OpenAI
 import numpy as np
 from PIL import Image
-from app.config import GEMINI_API_KEY, OPENAI_API_KEY
+from app.config import GEMINI_API_KEY, OPENAI_API_KEY, GROQ_API_KEY
 
 class LLMHelper:
     """Helper to route prompts and embedding generation to Gemini or OpenAI."""
@@ -12,8 +12,12 @@ class LLMHelper:
     @staticmethod
     def generate_text(prompt, provider="gemini", api_key=None, temperature=0.3, image_path=None):
         """Generates text from selected LLM provider, with optional multimodal support."""
-        # Clean keys
-        key = api_key if api_key else (GEMINI_API_KEY if provider == "gemini" else OPENAI_API_KEY)
+        if not api_key:
+            if provider == "gemini": key = GEMINI_API_KEY
+            elif provider == "groq": key = GROQ_API_KEY
+            else: key = OPENAI_API_KEY
+        else:
+            key = api_key
         
         if not key and provider != "ollama":
             # Sandbox mode fallback to allow demoing without keys
@@ -81,7 +85,12 @@ Based on our simulated data extraction, the company is showing strong fundamenta
     @staticmethod
     def generate_embeddings(text_chunks, provider="gemini", api_key=None):
         """Generates vector embeddings for a list of text chunks."""
-        key = api_key if api_key else (GEMINI_API_KEY if provider == "gemini" else OPENAI_API_KEY)
+        if not api_key:
+            if provider == "gemini": key = GEMINI_API_KEY
+            elif provider == "groq": key = GROQ_API_KEY
+            else: key = OPENAI_API_KEY
+        else:
+            key = api_key
         
         # 1536 is standard dimension for OpenAI (we can mock it with zeros/randoms in sandbox mode)
         dimension = 1536 if provider == "openai" else 768

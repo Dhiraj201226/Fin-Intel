@@ -17,6 +17,7 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 # Default Model configurations (fallbacks if user does not supply keys in headers)
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 
 # SQLite DB Path
 DB_PATH = os.path.join(DATA_DIR, "episodic_memory.db")
