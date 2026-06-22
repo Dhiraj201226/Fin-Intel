@@ -20,3 +20,4 @@ mplfinance
 pillow
 openai
 yahooquery
+groq

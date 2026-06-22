@@ -2,6 +2,7 @@ import os
 import time
 import google.generativeai as genai
 from openai import OpenAI
+from groq import Groq
 import numpy as np
 from PIL import Image
 from app.config import GEMINI_API_KEY, OPENAI_API_KEY, GROQ_API_KEY
@@ -58,7 +59,7 @@ Based on our simulated data extraction, the company is showing strong fundamenta
                     )
                     return response.choices[0].message.content
                 elif provider == "groq":
-                    client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key=key)
+                    client = Groq(api_key=key)
                     response = client.chat.completions.create(
                         model="llama-3.3-70b-versatile",
                         messages=[{"role": "user", "content": prompt}],
