@@ -281,5 +281,4 @@ async def upload_document(
         elif "dimension" in error_msg.lower() or "expected" in error_msg.lower():
             raise HTTPException(status_code=400, detail="Vector DB Dimension Mismatch: You likely switched LLM providers (e.g., from OpenAI to Gemini) which have different vector sizes. Please go to the Memory Vault and click the Trash icon to reset the database before uploading.")
         raise HTTPException(status_code=500, detail=f"Internal Server Error: {error_msg}")
-#   T r i g g e r   H u g g i n g F a c e   R e b u i l d  
- 
+# Trigger HuggingFace Rebuild
